@@ -1,5 +1,0 @@
-{% autoescape off %}{% if firm %}{{ firm.engineer_name }}, P.E.
-{{ firm.firm_name }}
-PE License #{{ firm.license_number }} ({{ firm.license_state }}){% if firm.phone %}
-{{ firm.phone }}{% endif %}
-{{ firm.email }}{% endif %}{% endautoescape %}

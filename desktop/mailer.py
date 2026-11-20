@@ -125,16 +125,11 @@ def venmo_link(username, cents, note):
 def invite(tx, settings):
     price = money(tx["price_cents"])
     ref = tx.get("ref_code") or f"PLN-{tx['id']}"
-    methods = tx.get("methods") or ["stripe"]
+    methods = tx.get("methods") or []
     intro = (f"Your plans for {tx['title']} are ready. A watermarked preview of every sheet is attached for "
              f"review. The final PDF is emailed to you once payment of {price} is received.")
     paragraphs, buttons = [_greeting(tx), intro], []
     many = len(methods) > 1
-    if "stripe" in methods and tx.get("link_url"):
-        p = (("Option: " if many else "") + "Pay online by card or bank transfer (secure checkout by Stripe). "
-             "The final PDF is emailed automatically within minutes.")
-        paragraphs.append(p)
-        buttons.append({"after": p, "label": f"Pay {price} online", "url": tx["link_url"]})
     if "zelle" in methods:
         z = settings.get("zelle") or {}
         who = z.get("recipient", "")
@@ -149,9 +144,8 @@ def invite(tx, settings):
         paragraphs.append(p)
         buttons.append({"after": p, "label": f"Pay {price} with Venmo", "color": "#008cff",
                         "url": venmo_link(user, tx["price_cents"], f"{ref} {tx['title']}")})
-    if any(m in methods for m in ("zelle", "venmo")):
-        paragraphs.append(f"Please include {ref} with Zelle or Venmo payments so we can match them. Once your "
-                          "payment is confirmed (usually the same day), the final PDF is emailed to this address.")
+    paragraphs.append(f"Please include {ref} with your payment so we can match it. Once it's received "
+                      "(usually the same day), the final PDF is emailed to this address.")
     paragraphs += [
         _manifest(tx),
         "The fingerprint above identifies the exact final file you'll receive; you can check it after downloading "
@@ -173,23 +167,6 @@ def files(tx, settings):
                   "Please keep this email for your records."]
     text, html = _wrap(paragraphs, settings, button)
     return f"Your final plans: {tx['title']}", text, html
-
-
-def pending(tx, settings):
-    paragraphs = [_greeting(tx),
-                  f"We've received your bank transfer for {tx['title']}. Bank payments usually take 3–5 business "
-                  "days to clear; the final plans will be emailed to you automatically as soon as it does. "
-                  "There's nothing else you need to do."]
-    text, html = _wrap(paragraphs, settings)
-    return f"Bank transfer received: {tx['title']}", text, html
-
-
-def ach_failed(tx, settings):
-    intro = (f"Your bank transfer for {tx['title']} didn't go through, so the plans haven't been released yet. "
-             "You can pay again here (card or bank):")
-    button = {"after": intro, "label": f"Pay {money(tx['price_cents'])}", "url": tx["link_url"]}
-    text, html = _wrap([_greeting(tx), intro], settings, button)
-    return f"Payment didn't go through: {tx['title']}", text, html
 
 
 def test_message(settings):

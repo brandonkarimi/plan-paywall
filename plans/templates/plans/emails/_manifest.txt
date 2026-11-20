@@ -1,4 +1,0 @@
-{% autoescape off %}Plan set: Rev {{ revision.number }}{% if revision.notes %} ({{ revision.notes }}){% endif %}
-Sheets: {{ revision.page_count }} page{{ revision.page_count|pluralize }}
-Locked: {{ revision.locked_at|date:"M j, Y g:i A" }}
-SHA-256 fingerprint: {{ revision.sha256 }}{% endautoescape %}

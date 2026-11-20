@@ -1,9 +1,0 @@
-{% autoescape off %}Subject: Bank transfer received and processing: {{ project.title }}
-
-Hi {{ project.client_name|default:"there" }},
-
-We've received your bank transfer for {{ project.title }}. Bank (ACH) payments usually take 3–5 business days to clear. Your final plans unlock automatically as soon as they do, and we'll email you. There's nothing else you need to do.
-
-Status: {{ portal_url }}
-
-{% include "plans/emails/_signature.txt" %}{% endautoescape %}

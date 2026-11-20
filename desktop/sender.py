@@ -1,10 +1,11 @@
-"""Send a plan PDF behind a pay wall: preview + Stripe Payment Link + email. The final PDF stays local."""
+"""Send plans behind a pay wall: the client gets a watermarked preview and payment instructions; the final PDF
+stays on this PC until the engineer marks the transaction paid."""
 import re
 import shutil
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from desktop import config, db, mailer, payments
+from desktop import config, db, mailer
 from plancore.pdfinfo import inspect_pdf
 from plancore.preview import build_preview
 
@@ -25,8 +26,8 @@ def _price_cents(price) -> int:
         value = Decimal(str(price).replace("$", "").replace(",", "").strip())
     except InvalidOperation:
         raise SendError("Enter a price like 1500 or 1500.00.")
-    if value < Decimal("0.50"):
-        raise SendError("The price must be at least $0.50 (Stripe's minimum).")
+    if value <= 0:
+        raise SendError("Enter a price greater than $0.")
     return int((value * 100).quantize(Decimal("1")))
 
 
@@ -47,32 +48,23 @@ def make_preview(final_path: Path, out_path: Path, text: str, settings) -> Path:
     return out_path
 
 
-def check_ready(from_email, settings, methods=("stripe",)):
-    if "stripe" in methods and not config.stripe_key():
-        raise SendError("Add your Stripe key in Settings first, or untick card payments.")
-    if "zelle" in methods and not settings["zelle"].get("recipient"):
-        raise SendError("Add your Zelle email or phone in Settings → Payment methods.")
-    if "venmo" in methods and not settings["venmo"].get("username"):
-        raise SendError("Add your Venmo username in Settings → Payment methods.")
-    if not config.account_for(from_email, settings):
-        raise SendError(f"{from_email or 'The From address'} isn't set up. Add it in Settings → Email accounts.")
-    if not config.smtp_password(from_email):
-        raise SendError(f"No password saved for {from_email}. Add it in Settings → Email accounts.")
-
-
 def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="", share_link="", methods=None,
                settings=None):
     """Returns the new transaction id. Raises SendError (NeedShareLink for very large PDFs).
 
-    methods: any of "stripe", "zelle", "venmo" (default: every method enabled in Settings).
+    methods: "zelle" and/or "venmo" (default: every method enabled in Settings).
     """
     settings = settings or config.load_settings()
+    from_email, to_email = from_email.strip(), to_email.strip()
+    client_name, title, share_link = client_name.strip(), title.strip(), share_link.strip()
     methods = [m for m in (methods if methods is not None else config.enabled_methods(settings))
                if m in config.PAYMENT_METHODS]
     if not methods:
-        raise SendError("Choose at least one way for the client to pay (set them up in Settings → Payment methods).")
-    from_email, to_email = from_email.strip(), to_email.strip()
-    client_name, title, share_link = client_name.strip(), title.strip(), share_link.strip()
+        raise SendError("Choose how the client can pay (set up Zelle or Venmo in Settings).")
+    if "zelle" in methods and not settings["zelle"].get("recipient"):
+        raise SendError("Add your Zelle email or phone in Settings.")
+    if "venmo" in methods and not settings["venmo"].get("username"):
+        raise SendError("Add your Venmo username in Settings.")
     if not EMAIL_RE.match(to_email):
         raise SendError("Enter the client's email address.")
     price_cents = _price_cents(price)
@@ -91,7 +83,10 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
             f"This PDF is {info['size_bytes'] / 1e6:.0f} MB, too big to email as an attachment. Upload it to "
             "OneDrive, Dropbox or Google Drive, create a share link, and paste it below. The link is only "
             "emailed to the client after they pay. Don't share it anywhere else.")
-    check_ready(from_email, settings, methods)
+    if not config.account_for(from_email, settings):
+        raise SendError(f"{from_email or 'The From address'} isn't set up. Add it in Settings → Email accounts.")
+    if not config.smtp_password(from_email):
+        raise SendError(f"No password saved for {from_email}. Add it in Settings → Email accounts.")
 
     title = title or src.stem.replace("_", " ").strip()
     tx_id = db.create_tx(
@@ -102,27 +97,15 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
     )
     db.update_tx(tx_id, ref_code=f"PLN-{tx_id}")
     folder = config.files_dir(tx_id)
-    link_id = ""
     try:
         final = folder / "final.pdf"
         shutil.copy2(src, final)
         preview = make_preview(final, folder / "preview.pdf", watermark_text(client_name, to_email), settings)
         db.update_tx(tx_id, final_path=str(final), preview_path=str(preview))
-
-        if "stripe" in methods:
-            link_id, link_url = payments.create_payment_link(db.get_tx(tx_id), allow_ach=settings.get("allow_ach", True))
-            db.update_tx(tx_id, link_id=link_id, link_url=link_url)
-
-        tx = db.get_tx(tx_id)
-        subject, text, html = mailer.invite(tx, settings)
+        subject, text, html = mailer.invite(db.get_tx(tx_id), settings)
         mailer.send(from_email, to_email, subject, text, html,
                     attachments=[(preview, f"PREVIEW - {title}.pdf")], settings=settings)
     except Exception as exc:
-        if link_id:
-            try:
-                payments.deactivate(link_id)
-            except Exception:
-                pass
         db.delete_tx(tx_id)
         shutil.rmtree(folder, ignore_errors=True)
         if isinstance(exc, SendError):
@@ -130,24 +113,22 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
         raise SendError(str(exc)) from exc
 
     db.update_tx(tx_id, status="sent", sent_at=db.now())
-    pay_by = ", ".join(config.PAYMENT_METHODS[m].split(" (")[0] for m in methods)
+    pay_by = ", ".join(config.PAYMENT_METHODS[m] for m in methods)
     db.log(tx_id, f"Sent to {to_email} from {from_email} ({mailer.money(price_cents)}, "
                   f"{info['page_count']} page{'s' if info['page_count'] != 1 else ''}). Pay by: {pay_by}. Ref PLN-{tx_id}")
     return tx_id
 
 
 def mark_paid(tx_id, method, amount=None, allow_short=False, settings=None):
-    """The engineer confirms a payment the app can't see (Zelle, Venmo, check, cash) and the plans go out.
+    """The engineer confirms the payment arrived; the final plans are emailed straight away.
 
-    Returns True if the final plans were emailed (False = paid but delivery failed; it retries automatically).
+    Returns True if the plans were emailed (False = marked paid but the email failed; use Resend).
     """
-    from desktop import watcher
-
     settings = settings or config.load_settings()
     tx = db.get_tx(int(tx_id))
     if tx is None:
         raise SendError("Transaction not found.")
-    if tx["status"] in ("paid", "refunded"):
+    if tx["status"] == "paid":
         raise SendError("This one is already marked paid.")
     if method not in config.MANUAL_METHODS:
         raise SendError("Choose how the client paid.")
@@ -157,29 +138,41 @@ def mark_paid(tx_id, method, amount=None, allow_short=False, settings=None):
                         "send the plans for a partial payment.")
     db.update_tx(tx["id"], status="paid", paid_at=db.now(), amount_paid_cents=cents, paid_method=method)
     db.log(tx["id"], f"Paid {mailer.money(cents)} via {method} (confirmed by you)")
-    if tx["link_id"]:  # stop the client also paying by card
-        try:
-            payments.deactivate(tx["link_id"])
-        except Exception:
-            db.log(tx["id"], "Couldn't switch off the Stripe pay link; switch it off in Stripe if needed")
-    return watcher.deliver(db.get_tx(tx["id"]), settings=settings)
+    return deliver(db.get_tx(tx["id"]), settings)
+
+
+def deliver(tx, settings=None):
+    """Email the final plans. Returns True on success; a failure is logged and shown in the app."""
+    settings = settings or config.load_settings()
+    try:
+        attachments = []
+        if not tx["share_link"]:
+            if not Path(tx["final_path"]).is_file():
+                raise mailer.MailError("The final PDF is missing from the app's files folder.")
+            attachments = [(tx["final_path"], f"{tx['title']}.pdf")]
+        subject, text, html = mailer.files(tx, settings)
+        mailer.send(tx["from_email"], tx["client_email"], subject, text, html, attachments, settings=settings)
+    except Exception as exc:
+        db.update_tx(tx["id"], delivery_error=str(exc))
+        db.log(tx["id"], f"Could not email the final plans: {exc}")
+        return False
+    first = not tx["delivered_at"]
+    db.update_tx(tx["id"], delivered_at=tx["delivered_at"] or db.now(), delivery_error="")
+    db.log(tx["id"], ("Final plans emailed to " if first else "Final plans re-sent to ") + tx["client_email"])
+    return True
 
 
 def resend(tx_id, settings=None):
-    """Re-send the pay link (unpaid) or the final plans (paid)."""
-    from desktop import watcher
-
+    """Re-send the payment instructions (unpaid) or the final plans (paid)."""
     settings = settings or config.load_settings()
     tx = db.get_tx(tx_id)
     if tx is None:
         raise SendError("Transaction not found.")
-    if tx["status"] in ("paid", "refunded"):
-        if tx["status"] == "refunded":
-            raise SendError("This one was refunded; the plans aren't re-sent.")
-        if not watcher.deliver(tx, settings=settings, force=True):
+    if tx["status"] == "paid":
+        if not deliver(tx, settings):
             raise SendError(db.get_tx(tx_id)["delivery_error"] or "Couldn't send.")
         return
     subject, text, html = mailer.invite(tx, settings)
     mailer.send(tx["from_email"], tx["client_email"], subject, text, html,
                 attachments=[(tx["preview_path"], f"PREVIEW - {tx['title']}.pdf")], settings=settings)
-    db.log(tx_id, "Pay link re-sent to client")
+    db.log(tx_id, "Payment instructions re-sent to client")

@@ -100,7 +100,6 @@
       <button data-tab="settings">Settings</button>
     </nav>
     <span class="spacer"></span>
-    <span class="badge hidden" id="test-badge" title="Using a Stripe test key: no real money moves">TEST MODE</span>
   </header>
 
   <div id="flash"></div>
@@ -147,7 +146,7 @@
         </div>
         <div class="full">
           <button class="btn big" id="send-btn">Send with pay wall</button>
-          <p class="small muted" style="text-align:center;margin:10px 0 0">The client gets a watermarked preview and how-to-pay instructions. The real PDF is emailed once they pay: automatically for card payments, or when you click <b>Mark as paid</b> for Zelle/Venmo.</p>
+          <p class="small muted" style="text-align:center;margin:10px 0 0">The client gets a watermarked preview and how-to-pay instructions. When their payment arrives, click <b>Mark as paid</b> in Transactions and the final PDF is emailed to them.</p>
         </div>
       </div>
     </div>
@@ -164,8 +163,6 @@
       </div>
       <p class="small muted" id="t-methods" style="margin:-4px 0 12px"></p>
       <div class="toolbar">
-        <button class="btn ghost" id="check-btn">Check for payments now</button>
-        <span class="small muted" id="last-check"></span>
         <span class="spacer"></span>
         <button class="btn ghost" id="csv-btn">Export log (CSV)</button>
       </div>
@@ -187,12 +184,7 @@
         <div><label>Venmo username</label><input id="m-venmo-user" type="text" placeholder="@your-business"></div>
         <div class="small muted" style="align-self:end">Venmo's rules require a <b>business profile</b> for getting paid for work (1.9% + 10¢). Personal accounts can be frozen.</div>
       </div>
-      <label class="check"><input type="checkbox" id="m-stripe">Card / bank transfer through Stripe <span class="pill" id="stripe-status" style="margin-left:8px">Not connected</span></label>
-      <div id="m-stripe-fields" style="margin:6px 0 4px 24px">
-        <p class="small muted" style="margin:0 0 6px">Paid automatically, plans go out within minutes. Stripe charges 2.9% + 30¢ per card payment (bank transfer 0.8%, max $5). Get your secret key from <a href="#" data-url="https://dashboard.stripe.com/apikeys">dashboard.stripe.com/apikeys</a>; use a test key (sk_test_…) to try it out.</p>
-        <input id="s-stripe" type="password" placeholder="sk_live_… or sk_test_… (leave blank to keep the current key)" autocomplete="off">
-      </div>
-      <p class="small muted" style="margin:14px 0 0">With Zelle and Venmo the app can't see the payment itself. When it arrives in your bank or Venmo app, open <b>Transactions → Mark as paid</b> and the final PDF is emailed straight away. Only mark it paid once you see the money, not from a screenshot.</p>
+      <p class="small muted" style="margin:14px 0 0">When a payment arrives in your bank or Venmo app, open <b>Transactions → Mark as paid</b> and the final PDF is emailed straight away. Only mark it paid once you see the money, not from a screenshot.</p>
     </div>
 
     <div class="card">
@@ -225,16 +217,8 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2>4. Options</h2>
-      <label class="check"><input type="checkbox" id="o-ach">Let clients pay by bank transfer (ACH): lower fees, takes 3–5 days to clear</label>
-      <label class="check"><input type="checkbox" id="o-startup">Start Plan Sender when Windows starts (recommended, so paid plans go out quickly)</label>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:8px" class="small">
-        Check Stripe for payments every <input id="o-poll" type="number" min="1" max="60" style="width:70px"> minutes
-      </div>
-      <p class="small muted">Your data is stored in <a href="#" id="data-dir"></a>.</p>
-    </div>
     <button class="btn" id="settings-save">Save settings</button>
+    <p class="small muted">Your data is stored in <a href="#" id="data-dir"></a>.</p>
   </section>
 </div>
 
@@ -276,7 +260,6 @@ async function loadState() {
   state = await api.state();
   presets = state.presets;
   const s = state.settings;
-  $("test-badge").classList.toggle("hidden", !s.test_mode);
   $("setup-note").classList.toggle("hidden", !state.setup_needed);
   const from = $("f-from"); from.replaceChildren();
   if (!s.accounts.length) from.append(el("option", { value: "" }, "Add an email account in Settings"));
@@ -284,7 +267,6 @@ async function loadState() {
   if (s.default_from) from.value = s.default_from;
   $("m-zelle").checked = !!s.zelle.enabled; $("m-zelle-to").value = s.zelle.recipient || ""; $("m-zelle-name").value = s.zelle.name || "";
   $("m-venmo").checked = !!s.venmo.enabled; $("m-venmo-user").value = s.venmo.username ? "@" + s.venmo.username : "";
-  $("m-stripe").checked = s.stripe_enabled !== false;
   toggleMethodFields();
   const fm = $("f-methods"); const prev = new Set([...fm.querySelectorAll("input:checked")].map(i => i.value)); fm.replaceChildren();
   if (!s.enabled_methods.length) fm.append(el("span", { class: "small muted" }, "No payment methods set up yet. Add them in Settings."));
@@ -292,9 +274,6 @@ async function loadState() {
     const box = el("input", { type: "checkbox", value: m }); box.checked = prev.size ? prev.has(m) : true;
     fm.append(el("label", {}, box, state.payment_methods[m]));
   });
-  const st = $("stripe-status");
-  st.textContent = s.stripe_connected ? (s.test_mode ? "Connected (test mode)" : "Connected (live)") : "Not connected";
-  st.className = "pill " + (s.stripe_connected ? (s.test_mode ? "warn" : "ok") : "err");
   const list = $("acct-list"); list.replaceChildren();
   if (!s.accounts.length) list.append(el("p", { class: "small muted", style: "margin:0" }, "No email accounts yet."));
   s.accounts.forEach(a => list.append(el("div", { class: "acct" },
@@ -306,8 +285,6 @@ async function loadState() {
   const sig = s.signature || {};
   $("g-name").value = sig.name || ""; $("g-firm").value = sig.firm || "";
   $("g-license").value = sig.license || ""; $("g-phone").value = sig.phone || "";
-  $("o-ach").checked = !!s.allow_ach; $("o-startup").checked = !!s.start_with_windows;
-  $("o-poll").value = Math.round((s.poll_seconds || 120) / 60);
   $("data-dir").textContent = state.data_dir;
   const ps = $("a-preset"); if (!ps.options.length) {
     Object.entries(presets).forEach(([k, p]) => ps.append(el("option", { value: k }, p.label)));
@@ -317,9 +294,8 @@ async function loadState() {
 function toggleMethodFields() {
   $("m-zelle-fields").classList.toggle("hidden", !$("m-zelle").checked);
   $("m-venmo-fields").classList.toggle("hidden", !$("m-venmo").checked);
-  $("m-stripe-fields").classList.toggle("hidden", !$("m-stripe").checked);
 }
-["m-zelle", "m-venmo", "m-stripe"].forEach(id => $(id).addEventListener("change", toggleMethodFields));
+["m-zelle", "m-venmo"].forEach(id => $(id).addEventListener("change", toggleMethodFields));
 function presetChanged() {
   const p = presets[$("a-preset").value] || {};
   $("a-help").textContent = p.help || "";
@@ -336,14 +312,14 @@ $("a-save").addEventListener("click", async () => {
 });
 $("settings-save").addEventListener("click", async () => {
   const b = $("settings-save"); b.disabled = true; b.textContent = "Saving…";
-  const r = await api.save_settings({ stripe_key: $("s-stripe").value, stripe_enabled: $("m-stripe").checked,
+  const r = await api.save_settings({
     zelle: { enabled: $("m-zelle").checked, recipient: $("m-zelle-to").value, name: $("m-zelle-name").value },
     venmo: { enabled: $("m-venmo").checked, username: $("m-venmo-user").value },
     signature: { name: $("g-name").value, firm: $("g-firm").value, license: $("g-license").value, phone: $("g-phone").value },
-    allow_ach: $("o-ach").checked, start_with_windows: $("o-startup").checked, poll_minutes: $("o-poll").value });
+  });
   b.disabled = false; b.textContent = "Save settings";
   if (!r.ok) return flash(r.error, "err");
-  $("s-stripe").value = ""; await loadState(); flash("Settings saved.");
+  await loadState(); flash("Settings saved.");
 });
 
 // ------------------------------------------------------------ send
@@ -382,7 +358,7 @@ async function loadTransactions() {
   const list = $("tx-list"); list.replaceChildren();
   if (!data.items.length) list.append(el("p", { class: "empty" }, "Nothing sent yet. Everything you send, and every update on it, is saved here."));
   for (const t of data.items) {
-    const paid = t.status === "paid" || t.status === "refunded";
+    const paid = t.status === "paid";
     const actions = el("div", { class: "actions" });
     let markForm = null;
     if (!paid) {
@@ -403,12 +379,11 @@ async function loadTransactions() {
           flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err"); if (r.ok) loadTransactions(); } }, "Confirm & send plans"),
         shortWrap);
       actions.append(el("button", { class: "btn", style: "padding:6px 12px;font-size:.85rem", onclick: () => markForm.classList.toggle("hidden") }, "Mark as paid…"));
-      if (t.link_url) actions.append(el("button", { class: "btn ghost", onclick: async (e) => { await navigator.clipboard.writeText(t.link_url); e.target.textContent = "Copied ✓"; } }, "Copy card pay link"));
     }
-    if (t.status !== "refunded") actions.append(el("button", { class: "btn ghost", onclick: async (e) => {
-      if (!confirm(paid ? `Email the final plans to ${t.client_email} again?` : `Email the pay link to ${t.client_email} again?`)) return;
+    actions.append(el("button", { class: "btn ghost", onclick: async (e) => {
+      if (!confirm(paid ? `Email the final plans to ${t.client_email} again?` : `Email the payment instructions to ${t.client_email} again?`)) return;
       e.target.disabled = true; const r = await api.resend(t.id); e.target.disabled = false;
-      flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err"); loadTransactions(); } }, paid ? "Resend final plans" : "Resend pay link"));
+      flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err"); loadTransactions(); } }, paid ? "Resend final plans" : "Resend payment instructions"));
     actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "preview") }, "Open preview"));
     actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "final") }, "Open final PDF"));
     const d = el("details", { class: "tx", "data-id": t.id },
@@ -418,34 +393,22 @@ async function loadTransactions() {
         el("div", {}, t.price),
         el("span", { class: `pill ${t.tone}` }, t.label)),
       el("div", { class: "body" },
-        t.delivery_error ? el("div", { class: "notice err small" }, `Plans not sent yet: ${t.delivery_error}. Retrying automatically.`) : null,
+        t.delivery_error ? el("div", { class: "notice err small" }, `Plans not sent: ${t.delivery_error}. Fix the problem, then use “Resend final plans”.`) : null,
         el("ol", { class: "timeline" }, t.activity.map(a => el("li", {}, el("time", {}, fmt(a.ts)), a.text))),
         el("div", { class: "sub", style: "margin-bottom:10px" }, `Ref ${t.ref_code || "-"} · pay by ${t.pay_by.join(", ") || "-"} · from ${t.from_email} · ${t.pages} pages · fingerprint ${t.sha256.slice(0, 12)}…${t.share_link ? " · delivered by link" : ""}`),
         markForm, actions));
     if (open.has(String(t.id))) d.open = true;
     list.append(d);
   }
-  const last = (await api.state()).last_check;
-  $("last-check").textContent = last ? `Last checked ${fmt(last)}` : "";
 }
-$("check-btn").addEventListener("click", async () => {
-  const b = $("check-btn"); b.disabled = true; b.textContent = "Checking…";
-  const r = await api.check_now(); b.disabled = false; b.textContent = "Check for payments now";
-  if (!r.ok) return flash(r.error, "err");
-  const s = r.summary; flash(s.paid ? `${s.paid} new payment${s.paid > 1 ? "s" : ""}! Plans sent: ${s.delivered}.` : "No new payments.");
-  if (s.errors.length) flash("Some checks failed: " + s.errors.join("; "), "err");
-  loadTransactions();
-});
 $("csv-btn").addEventListener("click", async () => {
   const r = await api.export_csv(); if (r.ok && r.path) flash(`Saved ${r.path}`);
 });
 
-window.refreshFromPython = () => { if (!$("tab-tx").classList.contains("hidden")) loadTransactions(); };
 window.addEventListener("pywebviewready", async () => {
   api = window.pywebview.api;
   await loadState();
   if (state.setup_needed) showTab("settings");
-  setInterval(window.refreshFromPython, 30000);
 });
 </script>
 </body>

@@ -1,9 +1,10 @@
 import hashlib
 import smtplib
+import sqlite3
 
 import pytest
 
-from desktop import config, db, sender, watcher
+from desktop import config, db, mailer, sender
 
 
 def send(env, **over):
@@ -17,34 +18,45 @@ def attachments(msg):
     return [(p.get_filename(), p.get_content()) for p in msg.iter_attachments()]
 
 
-def activity_texts(tx_id):
+def body(msg):
+    return msg.get_body(("plain",)).get_content()
+
+
+def log_texts(tx_id):
     return [a["text"] for a in reversed(db.activity(tx_id))]
 
 
 # ------------------------------------------------------------------ sending
-def test_send_emails_preview_and_pay_link_but_never_the_final(env):
+def test_send_emails_preview_and_instructions_but_never_the_final(env):
     tx_id = send(env)
     tx = db.get_tx(tx_id)
-    assert tx["status"] == "sent" and tx["title"] == "Lot 7 Grading"
-    assert tx["link_id"] == "plink_1" and tx["link_url"].startswith("https://buy.stripe.com/")
     original = env["pdf"].read_bytes()
-    assert tx["sha256"] == hashlib.sha256(original).hexdigest()
+    assert tx["status"] == "sent" and tx["title"] == "Lot 7 Grading" and tx["ref_code"] == f"PLN-{tx_id}"
+    assert tx["methods"] == ["zelle", "venmo"] and tx["sha256"] == hashlib.sha256(original).hexdigest()
 
     (msg,) = env["smtp"].sent
-    assert msg["To"] == "client@example.com" and "pat@acmecivil.test" in msg["From"]
-    assert msg["Reply-To"] == "pat@acmecivil.test"
-    body = msg.get_body(("plain",)).get_content()
-    assert tx["link_url"] in body and tx["sha256"] in body and "$1,500.00" in body and "Hi Jo Smith," in body
+    assert msg["To"] == "client@example.com" and msg["Reply-To"] == "pat@acmecivil.test"
+    text = body(msg)
+    assert "Hi Jo Smith," in text and tx["sha256"] in text
+    assert "Send $1,500.00 to pat@acmecivil.test (Pat Lee)" in text and f"Memo: PLN-{tx_id}" in text
+    assert f"https://venmo.com/AcmeCivil-Eng?txn=pay&amount=1500.00&note=PLN-{tx_id}%20Lot%207%20Grading" in text
     (name, data), = attachments(msg)
     assert name.startswith("PREVIEW") and data != original
-    assert activity_texts(tx_id)[0].startswith("Sent to client@example.com from pat@acmecivil.test ($1,500.00, 3 pages)")
+    assert log_texts(tx_id)[0].startswith("Sent to client@example.com from pat@acmecivil.test ($1,500.00, 3 pages)")
+
+
+def test_send_with_one_method(env):
+    send(env, methods=["zelle"])
+    text = body(env["smtp"].sent[0])
+    assert "Zelle" in text and "venmo.com" not in text
 
 
 @pytest.mark.parametrize("over, message", [
     ({"to_email": "nope"}, "client's email"),
-    ({"price": "0.10"}, r"at least \$0\.50"),
+    ({"price": "0"}, "greater than"),
     ({"price": "abc"}, "price like"),
     ({"from_email": "other@x.test"}, "isn't set up"),
+    ({"methods": []}, "how the client can pay"),
 ])
 def test_send_validation(env, over, message):
     with pytest.raises(sender.SendError, match=message):
@@ -59,190 +71,104 @@ def test_rejects_non_pdf(env):
         send(env, pdf_path=bad)
 
 
-def test_requires_stripe_key(env):
-    config.set_secret("stripe_secret_key", "")
-    with pytest.raises(sender.SendError, match="Stripe key"):
-        send(env, methods=["stripe"])
-
-
 def test_large_pdf_needs_share_link(env, monkeypatch):
     monkeypatch.setattr(config, "ATTACH_LIMIT_BYTES", 100)
     with pytest.raises(sender.NeedShareLink):
         send(env)
-    tx_id = send(env, share_link="https://onedrive.live.com/x")
-    assert db.get_tx(tx_id)["share_link"] == "https://onedrive.live.com/x"
+    tx_id = send(env, share_link="https://dropbox.com/s/abc")
+    sender.mark_paid(tx_id, "Zelle")
+    msg = env["smtp"].sent[-1]
+    assert attachments(msg) == [] and "https://dropbox.com/s/abc" in body(msg)
 
 
-def test_failed_email_rolls_back_and_disables_link(env):
+def test_failed_email_rolls_back(env):
     env["smtp"].fail_with = smtplib.SMTPAuthenticationError(535, b"bad")
     with pytest.raises(sender.SendError, match="Email login failed"):
         send(env)
     assert db.list_txs(["draft", "sent"]) == []
-    assert env["fake"].deactivated == ["plink_1"]
 
 
-# ------------------------------------------------------------------ watching Stripe
-def test_paid_delivers_final_once_and_closes_link(env):
+def test_venmo_link_encoding():
+    assert mailer.venmo_link("@pat lee", 12345, "PLN-3 A&B") == \
+        "https://venmo.com/pat%20lee?txn=pay&amount=123.45&note=PLN-3%20A%26B"
+
+
+# ------------------------------------------------------------------ marking paid
+def test_mark_paid_delivers_final_once(env):
     tx_id = send(env)
     env["smtp"].sent.clear()
-    watcher.check_all()
-    assert env["smtp"].sent == []  # nobody paid yet
-
-    env["fake"].pay("plink_1", 150000)
-    notes = []
-    summary = watcher.check_all(lambda t, m: notes.append(t))
+    assert sender.mark_paid(tx_id, "Zelle") is True
     tx = db.get_tx(tx_id)
-    assert tx["status"] == "paid" and tx["delivered_at"] and tx["amount_paid_cents"] == 150000
-    assert summary["paid"] == 1 and summary["delivered"] == 1
-    assert env["fake"].deactivated == ["plink_1"]
-    assert notes == ["PAID: Lot 7 Grading"]
+    assert tx["status"] == "paid" and tx["paid_method"] == "Zelle" and tx["amount_paid_cents"] == 150000
     (msg,) = env["smtp"].sent
     (name, data), = attachments(msg)
     assert name == "Lot 7 Grading.pdf" and data == env["pdf"].read_bytes()
+    with pytest.raises(sender.SendError, match="already marked paid"):
+        sender.mark_paid(tx_id, "Zelle")
+    assert len(env["smtp"].sent) == 1
+    assert "Paid $1,500.00 via Zelle (confirmed by you)" in log_texts(tx_id)
+    assert "Final plans emailed to client@example.com" in log_texts(tx_id)
 
-    watcher.check_all()
-    assert len(env["smtp"].sent) == 1  # never delivered twice
-    log = activity_texts(tx_id)
-    assert "Paid $1,500.00 by Stripe" in log and "Final plans emailed to client@example.com" in log
 
-
-def test_bank_transfer_pending_then_paid(env):
+def test_partial_payment_needs_explicit_release(env):
     tx_id = send(env)
-    env["smtp"].sent.clear()
-    env["fake"].pay("plink_1", 150000, state="pending")
-    watcher.check_all()
-    watcher.check_all()
-    assert db.get_tx(tx_id)["status"] == "pending"
-    assert [m["Subject"] for m in env["smtp"].sent] == ["Bank transfer received: Lot 7 Grading"]
-    env["fake"].pay("plink_1", 150000)
-    watcher.check_all()
-    assert db.get_tx(tx_id)["status"] == "paid"
+    with pytest.raises(sender.SendError, match="less than"):
+        sender.mark_paid(tx_id, "Venmo", "1000")
+    assert db.get_tx(tx_id)["status"] == "sent"
+    assert sender.mark_paid(tx_id, "Venmo", "1000", allow_short=True)
+    assert db.get_tx(tx_id)["amount_paid_cents"] == 100000
 
 
-def test_bank_transfer_failure_issues_new_link(env):
+def test_failed_delivery_is_reported_and_resend_fixes_it(env):
     tx_id = send(env)
-    env["smtp"].sent.clear()
-    env["fake"].pay("plink_1", 150000, state="failed")
-    watcher.check_all()
-    watcher.check_all()
-    tx = db.get_tx(tx_id)
-    assert tx["status"] == "sent" and tx["link_id"] == "plink_2" and tx["old_link_ids"] == ["plink_1"]
-    (msg,) = env["smtp"].sent
-    assert "didn't go through" in msg["Subject"] and "plink_2" in msg.get_body(("plain",)).get_content()
-
-
-def test_underpayment_never_delivers(env):
-    tx_id = send(env)
-    env["smtp"].sent.clear()
-    env["fake"].pay("plink_1", 100)
-    watcher.check_all()
-    watcher.check_all()
-    assert db.get_tx(tx_id)["status"] == "sent" and env["smtp"].sent == []
-    assert sum("mismatch" in t for t in activity_texts(tx_id)) == 1
-
-
-def test_failed_delivery_retries_and_logs_once(env):
-    tx_id = send(env)
-    env["smtp"].sent.clear()
-    env["fake"].pay("plink_1", 150000)
     env["smtp"].fail_with = smtplib.SMTPServerDisconnected("down")
-    watcher.check_all()
-    watcher.check_all()
+    assert sender.mark_paid(tx_id, "Check") is False
     tx = db.get_tx(tx_id)
     assert tx["status"] == "paid" and not tx["delivered_at"] and "down" in tx["delivery_error"]
-    assert sum("Could not email" in t for t in activity_texts(tx_id)) == 1
     env["smtp"].fail_with = None
-    watcher.check_all()
-    assert db.get_tx(tx_id)["delivered_at"] and len(env["smtp"].sent) == 1
-
-
-def test_share_link_delivery_has_no_attachment(env, monkeypatch):
-    monkeypatch.setattr(config, "ATTACH_LIMIT_BYTES", 100)
-    send(env, share_link="https://dropbox.com/s/abc")
-    env["smtp"].sent.clear()
-    env["fake"].pay("plink_1", 150000)
-    watcher.check_all()
-    (msg,) = env["smtp"].sent
-    assert attachments(msg) == [] and "https://dropbox.com/s/abc" in msg.get_body(("plain",)).get_content()
-
-
-def test_refund_detected(env):
-    tx_id = send(env)
-    env["fake"].pay("plink_1", 150000)
-    watcher.check_all()
-    db.set_flag(db.get_tx(tx_id), "refund_checked_at", "2000-01-01T00:00:00+00:00")
-    env["fake"].refunds["pi_plink_1"] = "refunded"
-    watcher.check_all()
-    assert db.get_tx(tx_id)["status"] == "refunded"
-    assert "Refunded in Stripe (the plans had already been emailed)" in activity_texts(tx_id)
+    sender.resend(tx_id)
+    assert db.get_tx(tx_id)["delivered_at"] and db.get_tx(tx_id)["delivery_error"] == ""
 
 
 def test_resend(env):
     tx_id = send(env)
     sender.resend(tx_id)
     assert env["smtp"].sent[-1]["Subject"].startswith("Plans ready for review")
-    env["fake"].pay("plink_1", 150000)
-    watcher.check_all()
+    sender.mark_paid(tx_id, "Cash")
     sender.resend(tx_id)
     assert env["smtp"].sent[-1]["Subject"].startswith("Your final plans")
-    assert "Final plans re-sent to client@example.com" in activity_texts(tx_id)
+    assert "Final plans re-sent to client@example.com" in log_texts(tx_id)
 
 
-# ------------------------------------------------------------------ Stripe parameters (real module, mocked HTTP)
-def test_payment_link_is_single_use_with_metadata(monkeypatch, tmp_path):
-    monkeypatch.setenv("PLANSENDER_HOME", str(tmp_path))
-    import keyring
-    from desktop import payments
-    from desktop.tests.conftest import MemoryKeyring
-
-    keyring.set_keyring(MemoryKeyring())
-    config.set_secret("stripe_secret_key", "sk_test_x")
-    calls = {}
-
-    class Obj:
-        def __init__(self, **kw):
-            self.__dict__.update(kw)
-
-    monkeypatch.setattr("stripe.Price.create", lambda **kw: calls.setdefault("price", kw) and Obj(id="price_1"))
-    monkeypatch.setattr("stripe.PaymentLink.create",
-                        lambda **kw: calls.setdefault("link", kw) and Obj(id="plink_1", url="https://buy.stripe.com/t"))
-    tx = {"id": 7, "title": "Lot 7", "client_email": "a+b@x.com", "currency": "usd", "price_cents": 1234, "sha256": "ab"}
-    link_id, url = payments.create_payment_link(tx)
-    assert link_id == "plink_1" and url == "https://buy.stripe.com/t?prefilled_email=a%2Bb%40x.com"
-    assert calls["price"]["unit_amount"] == 1234
-    link = calls["link"]
-    assert link["restrictions"] == {"completed_sessions": {"limit": 1}}
-    assert link["metadata"]["plansender_tx"] == "7"
-    assert link["payment_method_types"] == ["card", "us_bank_account"]
-
-
-# ------------------------------------------------------------------ window bridge (api.py)
-def test_api_accounts_transactions_and_csv(env, tmp_path):
+# ------------------------------------------------------------------ window bridge & storage
+def test_api_accounts_totals_and_csv(env, tmp_path):
     from desktop.api import Api, write_csv
 
     a = Api()
-    r = a.save_account({"preset": "gmail", "email": "Office@AcmeCivil.test", "name": "Acme", "password": "abcd efgh ijkl mnop"})
-    assert r["ok"]
+    assert a.save_account({"preset": "gmail", "email": "Office@AcmeCivil.test", "password": "abcd efgh ijkl mnop"})["ok"]
     assert config.smtp_password("office@acmecivil.test") == "abcdefghijklmnop"  # Gmail app-password spaces stripped
-    assert not a.save_account({"preset": "custom", "email": "x@y.test", "password": "p"})["ok"]  # custom needs a host
+    assert not a.save_account({"preset": "custom", "email": "x@y.test", "password": "p"})["ok"]  # needs a host
 
-    tx_id = send(env, from_email="office@acmecivil.test")
-    env["fake"].pay("plink_1", 150000)
-    assert a.check_now()["ok"]
+    t1 = send(env, from_email="office@acmecivil.test")
+    t2 = send(env, to_email="b@example.com")
+    send(env, to_email="c@example.com", price="200")
+    assert a.mark_paid(t1, "Zelle")["ok"] and a.mark_paid(t2, "Venmo")["ok"]
+    assert not a.mark_paid(t1, "Zelle")["ok"]
     data = a.transactions()
-    assert data["totals"] == {"sent": 1, "paid": 1, "collected": "$1,500.00", "waiting": "$0.00",
-                              "by_method": ["Stripe $1,500.00"]}
-    item = data["items"][0]
-    assert item["label"] == "Paid via Stripe · plans sent" and item["activity"][0]["text"].startswith("Final plans emailed")
+    assert data["totals"]["paid"] == 2 and data["totals"]["collected"] == "$3,000.00"
+    assert data["totals"]["waiting"] == "$200.00"
+    assert sorted(data["totals"]["by_method"]) == ["Venmo $1,500.00", "Zelle $1,500.00"]
+    labels = {i["id"]: i["label"] for i in data["items"]}
+    assert labels[t1] == "Paid via Zelle · plans sent"
 
     out = tmp_path / "log.csv"
     write_csv(out)
-    rows = out.read_text(encoding="utf-8-sig").splitlines()
-    assert rows[0].startswith("Date,Time,Project") and len(rows) == 1 + len(db.activity(tx_id))
-    assert "Paid $1,500.00 by Stripe" in out.read_text(encoding="utf-8-sig")
+    content = out.read_text(encoding="utf-8-sig")
+    assert content.startswith("Date,Time,Ref,Project") and "Paid $1,500.00 via Zelle" in content
 
-    assert a.remove_account("office@acmecivil.test")["ok"]
-    assert config.smtp_password("office@acmecivil.test") == ""
+    assert a.save_settings({"venmo": {"enabled": True, "username": "@new-handle"}})["ok"]
+    assert config.load_settings()["venmo"]["username"] == "new-handle"
+    assert not a.save_settings({"zelle": {"enabled": True, "recipient": ""}})["ok"]
 
 
 def test_api_send_reports_errors_instead_of_raising(env):
@@ -250,3 +176,24 @@ def test_api_send_reports_errors_instead_of_raising(env):
 
     r = Api().send({"from_email": "pat@acmecivil.test", "to_email": "bad", "price": "10", "pdf_path": str(env["pdf"])})
     assert r == {"ok": False, "error": "Enter the client's email address."}
+
+
+def test_old_database_upgrades_in_place(env):
+    path = config.db_path()
+    path.unlink()
+    conn = sqlite3.connect(path)  # first-release table, without the newer columns
+    conn.execute("CREATE TABLE transactions (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, "
+                 "title TEXT NOT NULL, client_name TEXT NOT NULL DEFAULT '', client_email TEXT NOT NULL, "
+                 "from_email TEXT NOT NULL, price_cents INTEGER NOT NULL, currency TEXT NOT NULL DEFAULT 'usd', "
+                 "status TEXT NOT NULL DEFAULT 'draft', original_name TEXT NOT NULL DEFAULT '', "
+                 "final_path TEXT NOT NULL DEFAULT '', preview_path TEXT NOT NULL DEFAULT '', "
+                 "share_link TEXT NOT NULL DEFAULT '', sha256 TEXT NOT NULL DEFAULT '', pages INTEGER, "
+                 "size_bytes INTEGER, sheets TEXT NOT NULL DEFAULT '[]', sent_at TEXT, paid_at TEXT, "
+                 "delivered_at TEXT, amount_paid_cents INTEGER, delivery_error TEXT NOT NULL DEFAULT '')")
+    conn.execute("INSERT INTO transactions (created_at, title, client_email, from_email, price_cents, status) "
+                 "VALUES ('2026-01-01', 'Old job', 'a@b.c', 'pat@acmecivil.test', 100, 'sent')")
+    conn.commit()
+    conn.close()
+    db.init()
+    (old,) = db.list_txs()
+    assert old["methods"] == [] and old["ref_code"] == "" and old["paid_method"] == ""

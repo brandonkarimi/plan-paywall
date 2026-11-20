@@ -19,9 +19,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     from_email TEXT NOT NULL,
     price_cents INTEGER NOT NULL,
     currency TEXT NOT NULL DEFAULT 'usd',
-    status TEXT NOT NULL DEFAULT 'draft',      -- draft | sent | pending | paid | refunded
-    link_id TEXT NOT NULL DEFAULT '',
-    link_url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft',      -- draft | sent | paid
     original_name TEXT NOT NULL DEFAULT '',
     final_path TEXT NOT NULL DEFAULT '',
     preview_path TEXT NOT NULL DEFAULT '',
@@ -33,16 +31,11 @@ CREATE TABLE IF NOT EXISTS transactions (
     sent_at TEXT,
     paid_at TEXT,
     delivered_at TEXT,
-    refunded_at TEXT,
     amount_paid_cents INTEGER,
-    payment_intent TEXT NOT NULL DEFAULT '',
-    session_id TEXT NOT NULL DEFAULT '',
     delivery_error TEXT NOT NULL DEFAULT '',
-    flags TEXT NOT NULL DEFAULT '{}',          -- small JSON bag: one-time log markers, last refund check
-    old_link_ids TEXT NOT NULL DEFAULT '[]',
     ref_code TEXT NOT NULL DEFAULT '',
-    methods TEXT NOT NULL DEFAULT '["stripe"]',  -- how the client may pay: stripe / zelle / venmo
-    paid_method TEXT NOT NULL DEFAULT ''          -- Stripe, Zelle, Venmo, Check, Cash, Other
+    methods TEXT NOT NULL DEFAULT '[]',        -- how the client may pay: zelle / venmo
+    paid_method TEXT NOT NULL DEFAULT ''       -- Zelle, Venmo, Check, Cash, Other
 );
 CREATE TABLE IF NOT EXISTS activity (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,6 +45,13 @@ CREATE TABLE IF NOT EXISTS activity (
 );
 CREATE INDEX IF NOT EXISTS activity_tx ON activity(tx_id, id);
 """
+
+# Columns added after the first release; older databases get them on startup.
+UPGRADE_COLUMNS = {
+    "ref_code": "TEXT NOT NULL DEFAULT ''",
+    "methods": "TEXT NOT NULL DEFAULT '[]'",
+    "paid_method": "TEXT NOT NULL DEFAULT ''",
+}
 
 
 def now() -> str:
@@ -71,14 +71,6 @@ def connect():
             conn.close()
 
 
-# Columns added after the first release; older databases get them on startup.
-UPGRADE_COLUMNS = {
-    "ref_code": "TEXT NOT NULL DEFAULT ''",
-    "methods": "TEXT NOT NULL DEFAULT '[\"stripe\"]'",
-    "paid_method": "TEXT NOT NULL DEFAULT ''",
-}
-
-
 def init():
     with connect() as c:
         c.executescript(SCHEMA)
@@ -93,15 +85,13 @@ def _row(r):
         return None
     d = dict(r)
     d["sheets"] = json.loads(d.get("sheets") or "[]")
-    d["flags"] = json.loads(d.get("flags") or "{}")
-    d["old_link_ids"] = json.loads(d.get("old_link_ids") or "[]")
-    d["methods"] = json.loads(d.get("methods") or '["stripe"]')
+    d["methods"] = json.loads(d.get("methods") or "[]")
     return d
 
 
 def _encode(fields):
     out = dict(fields)
-    for key in ("sheets", "flags", "old_link_ids", "methods"):
+    for key in ("sheets", "methods"):
         if key in out and not isinstance(out[key], str):
             out[key] = json.dumps(out[key])
     return out
@@ -130,8 +120,7 @@ def get_tx(tx_id):
 
 
 def list_txs(statuses=None):
-    sql = "SELECT * FROM transactions WHERE status != 'draft'"
-    args = []
+    sql, args = "SELECT * FROM transactions WHERE status != 'draft'", []
     if statuses:
         sql = f"SELECT * FROM transactions WHERE status IN ({', '.join('?' for _ in statuses)})"
         args = list(statuses)
@@ -153,10 +142,3 @@ def activity(tx_id):
     with connect() as c:
         return [dict(r) for r in c.execute(
             "SELECT ts, text FROM activity WHERE tx_id = ? ORDER BY id DESC", [tx_id]).fetchall()]
-
-
-def set_flag(tx, key, value=True):
-    flags = dict(tx.get("flags") or {})
-    flags[key] = value
-    update_tx(tx["id"], flags=flags)
-    tx["flags"] = flags

@@ -1,6 +1,0 @@
-{% autoescape off %}Subject: PAID: {{ project.title }} ({{ project.client_display }})
-
-{{ project.client_display }} paid {% if project.amount_paid_cents %}${{ project.amount_paid|floatformat:"2g" }}{% else %}${{ project.price }}{% endif %} for {{ project.title }}{% if project.project_number %} ({{ project.project_number }}){% endif %}.
-The final plans were released to {{ project.client_email }} automatically.
-
-Client portal: {{ portal_url }}{% endautoescape %}

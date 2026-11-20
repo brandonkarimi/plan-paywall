@@ -6,7 +6,7 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
-from desktop import config, db, mailer, payments, sender, watcher
+from desktop import config, db, mailer, sender
 
 log = logging.getLogger(__name__)
 
@@ -22,41 +22,29 @@ def _err(exc_or_msg, **kw):
 def public_settings(settings=None):
     settings = settings or config.load_settings()
     accounts = [{**a, "has_password": bool(config.smtp_password(a["email"]))} for a in settings["accounts"]]
-    key = config.stripe_key()
-    return {**settings, "accounts": accounts, "stripe_connected": bool(key),
-            "test_mode": payments.is_test_key(key) if key else False,
-            "enabled_methods": config.enabled_methods(settings)}
+    return {**settings, "accounts": accounts, "enabled_methods": config.enabled_methods(settings)}
 
 
 def transaction_view(tx):
     via = f" via {tx['paid_method']}" if tx.get("paid_method") else ""
-    if tx["status"] == "paid" and not tx["delivered_at"]:
-        label, tone = f"Paid{via} · plans NOT sent yet", "err"
+    if tx["status"] == "paid":
+        label, tone = (f"Paid{via} · plans sent", "ok") if tx["delivered_at"] else (f"Paid{via} · plans NOT sent", "err")
     else:
-        label, tone = {
-            "sent": ("Not paid yet", ""),
-            "pending": ("Bank transfer clearing", "warn"),
-            "paid": (f"Paid{via} · plans sent", "ok"),
-            "refunded": ("Refunded", "err"),
-        }.get(tx["status"], (tx["status"], ""))
-    pay_by = [config.PAYMENT_METHODS[m].split(" (")[0] for m in tx.get("methods") or [] if m in config.PAYMENT_METHODS]
+        label, tone = "Not paid yet", ""
     return {
         "id": tx["id"], "title": tx["title"], "client_name": tx["client_name"], "client_email": tx["client_email"],
-        "from_email": tx["from_email"], "price": mailer.money(tx["price_cents"]), "price_cents": tx["price_cents"],
-        "status": tx["status"], "label": label, "tone": tone, "sent_at": tx["sent_at"], "paid_at": tx["paid_at"],
-        "link_url": tx["link_url"], "pages": tx["pages"], "sha256": tx["sha256"], "share_link": tx["share_link"],
-        "delivery_error": tx["delivery_error"], "delivered": bool(tx["delivered_at"]),
-        "ref_code": tx.get("ref_code") or "", "pay_by": pay_by, "paid_method": tx.get("paid_method") or "",
-        "amount_paid": mailer.money(tx["amount_paid_cents"]) if tx["amount_paid_cents"] else "",
+        "from_email": tx["from_email"], "price": mailer.money(tx["price_cents"]), "status": tx["status"],
+        "label": label, "tone": tone, "sent_at": tx["sent_at"], "paid_at": tx["paid_at"], "pages": tx["pages"],
+        "sha256": tx["sha256"], "share_link": tx["share_link"], "delivery_error": tx["delivery_error"],
+        "ref_code": tx.get("ref_code") or "", "paid_method": tx.get("paid_method") or "",
+        "pay_by": [config.PAYMENT_METHODS[m] for m in tx.get("methods") or [] if m in config.PAYMENT_METHODS],
         "activity": db.activity(tx["id"]),
     }
 
 
 class Api:
-    def __init__(self, watcher_thread=None, notify=None):
+    def __init__(self):
         self._window = None
-        self._watcher = watcher_thread
-        self._notify = notify or (lambda title, message: None)
 
     def _attach(self, window):
         self._window = window
@@ -64,31 +52,28 @@ class Api:
     # ------------------------------------------------------------ state
     def state(self):
         settings = public_settings()
-        last = self._watcher.last_run.isoformat() if self._watcher and self._watcher.last_run else None
-        return {"settings": settings, "presets": config.SMTP_PRESETS, "last_check": last,
-                "payment_methods": config.PAYMENT_METHODS, "manual_methods": config.MANUAL_METHODS,
-                "data_dir": str(config.data_dir()),
+        return {"settings": settings, "presets": config.SMTP_PRESETS, "payment_methods": config.PAYMENT_METHODS,
+                "manual_methods": config.MANUAL_METHODS, "data_dir": str(config.data_dir()),
                 "setup_needed": not (settings["enabled_methods"] and settings["accounts"])}
 
     def transactions(self):
         txs = db.list_txs()
         paid = [t for t in txs if t["status"] == "paid"]
-        waiting = [t for t in txs if t["status"] in ("sent", "pending")]
         by_method = {}
         for t in paid:
-            m = t.get("paid_method") or "Stripe"
+            m = t.get("paid_method") or "Other"
             by_method[m] = by_method.get(m, 0) + (t["amount_paid_cents"] or t["price_cents"])
         return {
             "items": [transaction_view(t) for t in txs],
             "totals": {
                 "sent": len(txs), "paid": len(paid),
                 "collected": mailer.money(sum(t["amount_paid_cents"] or t["price_cents"] for t in paid)),
-                "waiting": mailer.money(sum(t["price_cents"] for t in waiting)),
+                "waiting": mailer.money(sum(t["price_cents"] for t in txs if t["status"] == "sent")),
                 "by_method": [f"{m} {mailer.money(c)}" for m, c in sorted(by_method.items(), key=lambda x: -x[1])],
             },
         }
 
-    # ------------------------------------------------------------ sending
+    # ------------------------------------------------------------ sending & payments
     def choose_pdf(self):
         import webview
 
@@ -123,8 +108,8 @@ class Api:
             log.exception("Send failed")
             return _err(f"Unexpected error: {exc}")
         tx = db.get_tx(tx_id)
-        return _ok(message=f"Sent “{tx['title']}” to {tx['client_email']}. "
-                           f"The final PDF is emailed to them automatically once they pay {mailer.money(tx['price_cents'])}.")
+        return _ok(message=f"Sent “{tx['title']}” to {tx['client_email']} (ref {tx['ref_code']}). When their "
+                           f"payment arrives, open Transactions and click Mark as paid.")
 
     def mark_paid(self, tx_id, method, amount="", allow_short=False):
         try:
@@ -137,8 +122,7 @@ class Api:
         tx = db.get_tx(int(tx_id))
         if delivered:
             return _ok(message=f"Marked paid via {method}. The final plans were emailed to {tx['client_email']}.")
-        return _err(f"Marked paid, but the plans couldn't be emailed: {tx['delivery_error']}. "
-                    "The app will keep retrying; you can also use Resend.")
+        return _err(f"Marked paid, but the plans couldn't be emailed: {tx['delivery_error']}. Fix it and use Resend.")
 
     def resend(self, tx_id):
         try:
@@ -146,15 +130,6 @@ class Api:
         except Exception as exc:
             return _err(exc)
         return _ok(message="Sent again.")
-
-    def check_now(self):
-        try:
-            summary = watcher.check_all(self._notify)
-        except Exception as exc:
-            return _err(exc)
-        if self._watcher:
-            self._watcher.last_run = datetime.now().astimezone()
-        return _ok(summary=summary)
 
     # ------------------------------------------------------------ files & links
     def open_file(self, tx_id, which):
@@ -189,18 +164,8 @@ class Api:
     # ------------------------------------------------------------ settings
     def save_settings(self, payload):
         settings = config.load_settings()
-        key = (payload.get("stripe_key") or "").strip()
-        if key:
-            if not key.startswith(("sk_", "rk_")):
-                return _err("That doesn't look like a Stripe secret key (it starts with sk_ or rk_).")
-            try:
-                payments.check_key(key)
-            except Exception as exc:
-                return _err(f"Stripe didn't accept that key: {exc}")
-            config.set_secret("stripe_secret_key", key)
-        for field in ("signature",):
-            if field in payload:
-                settings[field] = {k: str(v).strip() for k, v in payload[field].items()}
+        if "signature" in payload:
+            settings["signature"] = {k: str(v).strip() for k, v in payload["signature"].items()}
         for field in ("zelle", "venmo"):
             if field in payload:
                 clean = {k: (v.strip() if isinstance(v, str) else bool(v)) for k, v in payload[field].items()}
@@ -210,14 +175,7 @@ class Api:
                     return _err(f"Enter your {field.title()} {'email or phone' if field == 'zelle' else 'username'}, "
                                 f"or switch {field.title()} off.")
                 settings[field] = {**settings[field], **clean}
-        for field in ("allow_ach", "start_with_windows", "stripe_enabled"):
-            if field in payload:
-                settings[field] = bool(payload[field])
-        if "poll_minutes" in payload:
-            settings["poll_seconds"] = max(1, int(payload["poll_minutes"] or 2)) * 60
         config.save_settings(settings)
-        if self._watcher:
-            self._watcher.trigger()
         return _ok(state=self.state())
 
     def save_account(self, acct):
@@ -265,11 +223,11 @@ class Api:
 def write_csv(path):
     with open(path, "w", newline="", encoding="utf-8-sig") as f:  # BOM so Excel reads accents correctly
         w = csv.writer(f)
-        w.writerow(["Date", "Time", "Project", "Client email", "Client name", "Sent from", "Price",
+        w.writerow(["Date", "Time", "Ref", "Project", "Client email", "Client name", "Sent from", "Price",
                     "Current status", "Update"])
         for tx in db.list_txs():
             view = transaction_view(tx)
             for entry in reversed(view["activity"]):
                 ts = datetime.fromisoformat(entry["ts"]).astimezone()
-                w.writerow([f"{ts:%Y-%m-%d}", f"{ts:%H:%M}", tx["title"], tx["client_email"], tx["client_name"],
-                            tx["from_email"], view["price"], view["label"], entry["text"]])
+                w.writerow([f"{ts:%Y-%m-%d}", f"{ts:%H:%M}", view["ref_code"], tx["title"], tx["client_email"],
+                            tx["client_name"], tx["from_email"], view["price"], view["label"], entry["text"]])

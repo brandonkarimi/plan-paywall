@@ -1,11 +1,9 @@
-"""Paths, settings and secrets for the desktop app.
+"""Paths, settings and secrets.
 
-Non-secret settings live in %APPDATA%\\PlanSender\\settings.json.
-Secrets (Stripe key, email passwords) live in Windows Credential Manager via `keyring`.
+Settings live in %APPDATA%\\PlanSender\\settings.json; email passwords live in Windows Credential Manager.
 """
 import json
 import os
-import sys
 from pathlib import Path
 
 import keyring
@@ -13,6 +11,9 @@ import keyring
 APP_NAME = "PlanSender"
 KEYRING_SERVICE = "PlanSender"
 ATTACH_LIMIT_BYTES = 18 * 1024 * 1024  # ~25 MB once email-encoded; larger finals need a share link
+
+PAYMENT_METHODS = {"zelle": "Zelle", "venmo": "Venmo"}
+MANUAL_METHODS = ["Zelle", "Venmo", "Check", "Cash", "Other"]
 
 SMTP_PRESETS = {
     "gmail": {"label": "Gmail / Google Workspace", "host": "smtp.gmail.com", "port": 465, "security": "ssl",
@@ -30,12 +31,8 @@ DEFAULT_SETTINGS = {
     "accounts": [],          # [{"email", "name", "preset", "host", "port", "security"}]; passwords in keyring
     "default_from": "",
     "signature": {"name": "", "firm": "", "license": "", "phone": ""},
-    "allow_ach": True,
-    "stripe_enabled": True,
-    "zelle": {"enabled": False, "recipient": "", "name": ""},   # email or phone clients send to + name shown in Zelle
+    "zelle": {"enabled": False, "recipient": "", "name": ""},   # email/phone clients send to + name shown in Zelle
     "venmo": {"enabled": False, "username": ""},
-    "start_with_windows": False,
-    "poll_seconds": 120,
     "preview_dpi": 100,
     "seal_box": "",
 }
@@ -62,7 +59,6 @@ def log_path() -> Path:
     return data_dir() / "plansender.log"
 
 
-# ------------------------------------------------------------------ settings
 def load_settings() -> dict:
     path = data_dir() / "settings.json"
     settings = json.loads(json.dumps(DEFAULT_SETTINGS))
@@ -80,19 +76,11 @@ def load_settings() -> dict:
 def save_settings(settings: dict):
     clean = {k: settings.get(k, v) for k, v in DEFAULT_SETTINGS.items()}
     (data_dir() / "settings.json").write_text(json.dumps(clean, indent=2), encoding="utf-8")
-    set_start_with_windows(bool(clean["start_with_windows"]))
-
-
-PAYMENT_METHODS = {"stripe": "Card / bank (Stripe)", "zelle": "Zelle", "venmo": "Venmo"}
-MANUAL_METHODS = ["Zelle", "Venmo", "Check", "Cash", "Other"]
 
 
 def enabled_methods(settings=None) -> list:
-    """Payment methods ready to offer clients, in display order."""
     settings = settings or load_settings()
     methods = []
-    if settings.get("stripe_enabled", True) and stripe_key():
-        methods.append("stripe")
     if settings["zelle"].get("enabled") and settings["zelle"].get("recipient"):
         methods.append("zelle")
     if settings["venmo"].get("enabled") and settings["venmo"].get("username"):
@@ -108,7 +96,6 @@ def account_for(email: str, settings=None):
     return None
 
 
-# ------------------------------------------------------------------ secrets
 def get_secret(name: str) -> str:
     try:
         return keyring.get_password(KEYRING_SERVICE, name) or ""
@@ -126,38 +113,5 @@ def set_secret(name: str, value: str):
             pass
 
 
-def stripe_key() -> str:
-    return get_secret("stripe_secret_key")
-
-
 def smtp_password(email: str) -> str:
     return get_secret(f"smtp:{email.lower()}")
-
-
-# ------------------------------------------------------------------ start with Windows
-RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-
-
-def launch_command(tray=True) -> str:
-    if getattr(sys, "frozen", False):
-        cmd = f'"{sys.executable}"'
-    else:
-        pyw = Path(sys.executable).with_name("pythonw.exe")
-        script = Path(__file__).resolve().parent.parent / "run_desktop.py"
-        cmd = f'"{pyw if pyw.exists() else sys.executable}" "{script}"'
-    return cmd + (" --tray" if tray else "")
-
-
-def set_start_with_windows(enabled: bool):
-    if sys.platform != "win32" or os.environ.get("PLANSENDER_HOME"):  # never touch the registry from tests
-        return
-    import winreg
-
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
-        if enabled:
-            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, launch_command(tray=True))
-        else:
-            try:
-                winreg.DeleteValue(key, APP_NAME)
-            except FileNotFoundError:
-                pass

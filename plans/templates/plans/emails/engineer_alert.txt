@@ -1,8 +1,0 @@
-{% autoescape off %}Subject: ACTION NEEDED: {{ project.title }} ({{ project.client_display }})
-
-{{ message }}
-
-Project: {{ project.title }}{% if project.project_number %} ({{ project.project_number }}){% endif %}
-Client: {{ project.client_display }} <{{ project.client_email }}>
-Status: {{ project.get_status_display }}
-Portal: {{ portal_url }}{% endautoescape %}
