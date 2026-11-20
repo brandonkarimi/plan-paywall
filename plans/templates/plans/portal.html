@@ -1,0 +1,111 @@
+{% extends "plans/base.html" %}
+{% block head %}{% if awaiting_webhook or project.status == "pending" %}<meta http-equiv="refresh" content="{% if awaiting_webhook %}3{% else %}60{% endif %}">{% endif %}{% endblock %}
+{% block title %}{{ project.title }}{% if firm %} | {{ firm.firm_name }}{% endif %}{% endblock %}
+{% block content %}
+
+<header class="firm">
+  <div>
+    <h1>{% if firm %}{{ firm.firm_name }}{% else %}Engineering plans{% endif %}</h1>
+    {% if firm %}<div class="muted small">{{ firm.engineer_name }}, P.E. · License #{{ firm.license_number }} ({{ firm.license_state }})
+      {% if firm.license_lookup_url %} · <a href="{{ firm.license_lookup_url }}" target="_blank" rel="noopener">Verify license with the state board</a>{% endif %}</div>{% endif %}
+  </div>
+  {% if firm %}<div class="small muted">{{ firm.email }}{% if firm.phone %} · {{ firm.phone }}{% endif %}</div>{% endif %}
+</header>
+
+{% for message in messages %}<div class="notice {% if message.tags == 'error' %}err{% else %}ok{% endif %}">{{ message }}</div>{% endfor %}
+
+<div class="card">
+  <div class="row">
+    <div>
+      <div class="muted small">{% if project.project_number %}Project {{ project.project_number }} · {% endif %}Prepared for {{ project.client_display }}</div>
+      <h2 style="font-size:1.4rem;margin:4px 0 0">{{ project.title }}</h2>
+    </div>
+    {% if project.status == "paid" %}<span class="pill ok">Paid: files unlocked</span>
+    {% elif project.status == "pending" %}<span class="pill warn">Bank transfer processing</span>
+    {% elif project.status == "refunded" %}<span class="pill err">Refunded</span>
+    {% else %}<span class="pill">Awaiting payment</span>{% endif %}
+  </div>
+</div>
+
+{% if project.status == "paid" %}
+  <div class="card">
+    <h2>Your plans are ready</h2>
+    <p style="margin-top:0">Thank you for your payment. This is the final issued plan set{% if revision %} (Rev {{ revision.number }}){% endif %}. This link stays active, so you can come back and download it again any time.</p>
+    <a class="btn" href="{% url 'plans:download' project.access_token %}">Download final plans (PDF)</a>
+    {% if past_revisions %}
+      <p class="small muted" style="margin-bottom:0">Earlier revisions:
+        {% for r in past_revisions %}<a href="{% url 'plans:download_rev' project.access_token r.number %}">Rev {{ r.number }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+    {% endif %}
+  </div>
+{% elif project.status == "refunded" %}
+  <div class="notice err">This project's payment was refunded, so the files are locked. Contact {{ firm.email|default:"the engineer" }} with any questions.</div>
+{% elif project.status == "pending" %}
+  <div class="notice warn"><b>Bank transfer received and processing.</b> Bank (ACH) payments usually take 3–5 business days to clear. Your files unlock automatically the moment they do, and we'll email you. You don't need to do anything else.</div>
+{% elif awaiting_webhook %}
+  <div class="notice ok"><b>Confirming your payment…</b> This usually takes a few seconds. This page refreshes automatically.</div>
+{% else %}
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="muted small">Amount due</div>
+        <div class="price">${{ project.price|floatformat:"2g" }} <span class="small muted">{{ project.currency|upper }}</span></div>
+      </div>
+      {% if stripe_ready and revision %}
+      <form method="post" action="{% url 'plans:checkout' project.access_token %}">{% csrf_token %}
+        <button class="btn" type="submit">Pay &amp; unlock final plans</button>
+      </form>
+      {% else %}
+      <span class="muted small">Online payment isn't available yet. Please contact the engineer.</span>
+      {% endif %}
+    </div>
+    <ul class="checks small" style="margin-top:16px">
+      <li><b>Instant, automatic delivery:</b> the download unlocks the moment your payment is confirmed. No waiting on anyone.</li>
+      <li><b>You get exactly this plan set:</b> the final file is locked and fingerprinted below. Its sheets match the preview page for page.</li>
+      <li><b>Delivery guarantee:</b> if a technical problem stops you from getting your files within {{ guarantee_hours }} hours of payment, you're refunded in full automatically.</li>
+      <li>Secure checkout by Stripe{% if project.allow_ach %} (card or bank transfer){% endif %}. Your payment details never touch this site.</li>
+    </ul>
+  </div>
+{% endif %}
+
+{% if revision %}
+<div class="card">
+  <h2>What you're receiving</h2>
+  <dl class="grid">
+    <dt>Plan set</dt><dd>Rev {{ revision.number }}{% if revision.notes %}: {{ revision.notes }}{% endif %}</dd>
+    <dt>Sheets</dt><dd>{{ revision.page_count }} page{{ revision.page_count|pluralize }} · {{ revision.size_bytes|filesizeformat }} PDF</dd>
+    <dt>Issued &amp; locked</dt><dd>{{ revision.locked_at|date:"M j, Y g:i A" }}</dd>
+    <dt>File fingerprint</dt><dd><span class="hash">SHA-256 {{ revision.sha256 }}</span></dd>
+  </dl>
+  {% if revision.sheet_index %}
+  <details style="margin-top:12px" open><summary class="small muted">Sheet index</summary>
+    <ol class="sheets small">{% for s in revision.sheet_index %}<li>{{ s }}</li>{% endfor %}</ol>
+  </details>
+  {% endif %}
+  <details style="margin-top:12px"><summary class="small muted">How to check the fingerprint</summary>
+    <p class="small">The fingerprint is unique to this exact file. After downloading, you can confirm you got the identical file that was locked here:<br>
+      Windows: <code>certutil -hashfile "file.pdf" SHA256</code><br>
+      Mac/Linux: <code>shasum -a 256 file.pdf</code></p>
+  </details>
+  {% if project.scope %}<h2 style="margin-top:18px">Scope</h2><p style="white-space:pre-line;margin:0">{{ project.scope }}</p>{% endif %}
+  {% if project.contract %}<p class="small" style="margin-bottom:0"><a href="{% url 'plans:contract' project.access_token %}" target="_blank">View signed agreement (PDF)</a></p>{% endif %}
+</div>
+
+{% if project.status != "paid" and revision.preview_file %}
+<div class="card">
+  <div class="row" style="margin-bottom:12px">
+    <h2 style="margin:0">Preview</h2>
+    <a class="btn secondary" href="{% url 'plans:preview' project.access_token %}" target="_blank">Open full screen</a>
+  </div>
+  <p class="small muted" style="margin-top:0">A watermarked, review-only copy of every sheet. The final unwatermarked{% if firm %}, sealed{% endif %} PDF unlocks after payment.</p>
+  <iframe class="preview" src="{% url 'plans:preview' project.access_token %}#view=FitH" title="Plan preview"></iframe>
+</div>
+{% endif %}
+{% endif %}
+
+<footer>
+  <form method="post" action="{% url 'plans:resend' project.access_token %}" style="display:inline">{% csrf_token %}
+    Lost this link? <button class="btn secondary" type="submit" style="padding:4px 10px">Email it to me again</button>
+  </form>
+  {% if firm %}<p>{{ firm.firm_name }}{% if firm.address %} · {{ firm.address|linebreaksbr }}{% endif %}{% if firm.website %} · <a href="{{ firm.website }}">{{ firm.website }}</a>{% endif %}</p>{% endif %}
+</footer>
+{% endblock %}

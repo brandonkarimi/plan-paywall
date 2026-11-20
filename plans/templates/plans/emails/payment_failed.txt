@@ -1,0 +1,9 @@
+{% autoescape off %}Subject: Bank transfer didn't go through: {{ project.title }}
+
+Hi {{ project.client_name|default:"there" }},
+
+Your bank transfer for {{ project.title }} was not completed by your bank, so the plans are still locked. You can try again (by card or bank) here:
+
+{{ portal_url }}
+
+{% include "plans/emails/_signature.txt" %}{% endautoescape %}

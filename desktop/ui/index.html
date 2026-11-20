@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan Sender</title>
+<style>
+  :root {
+    --bg: #f3f4f6; --card: #ffffff; --text: #16191d; --muted: #5d6670; --line: #dde1e6; --field: #f8f9fb;
+    --accent: #1d4ed8; --accent-text: #ffffff; --ok: #15803d; --ok-bg: #e8f6ee; --warn: #b45309; --warn-bg: #fdf3e3;
+    --err: #b91c1c; --err-bg: #fdeaea; --chip: #eef1f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1215; --card: #181c21; --text: #e8ebee; --muted: #9aa4ae; --line: #2a3038; --field: #12161a;
+      --accent: #6b8ff0; --accent-text: #0b0d10; --ok: #4ade80; --ok-bg: #12261a; --warn: #fbbf24; --warn-bg: #2a2110;
+      --err: #f87171; --err-bg: #2b1414; --chip: #20262d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 18px 20px 40px; }
+  header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 1.25rem; margin: 0 8px 0 0; }
+  nav { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 4px; }
+  nav button { border: 0; background: none; color: var(--muted); font: inherit; font-weight: 600; padding: 7px 16px;
+    border-radius: 7px; cursor: pointer; }
+  nav button.active { background: var(--accent); color: var(--accent-text); }
+  .badge { font-size: .75rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--warn-bg); color: var(--warn); }
+  .spacer { flex: 1; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+  .full { grid-column: 1 / -1; }
+  label { display: block; font-weight: 600; font-size: .85rem; margin-bottom: 4px; }
+  .opt { font-weight: 400; color: var(--muted); }
+  input, select { width: 100%; font: inherit; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--field); color: var(--text); }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  input[type=checkbox] { width: auto; margin-right: 8px; }
+  .check { display: flex; align-items: center; font-weight: 400; font-size: .92rem; }
+  .btn { border: 0; cursor: pointer; font: inherit; font-weight: 600; background: var(--accent); color: var(--accent-text);
+    padding: 10px 18px; border-radius: 8px; }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); font-weight: 500; padding: 6px 12px; font-size: .85rem; }
+  .btn.big { width: 100%; padding: 14px; font-size: 1.05rem; }
+  .pick { display: flex; align-items: center; gap: 14px; border: 2px dashed var(--line); border-radius: 10px; padding: 16px; cursor: pointer; }
+  .pick:hover, .pick.has { border-color: var(--accent); }
+  .pick .name { font-weight: 600; overflow-wrap: anywhere; }
+  .muted { color: var(--muted); }
+  .small { font-size: .85rem; }
+  .notice { border-radius: 8px; padding: 11px 14px; margin-bottom: 14px; }
+  .notice.ok { background: var(--ok-bg); color: var(--ok); }
+  .notice.err { background: var(--err-bg); color: var(--err); }
+  .notice.warn { background: var(--warn-bg); color: var(--warn); }
+  .hidden { display: none !important; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+  .stats div { background: var(--field); border-radius: 8px; padding: 10px 12px; }
+  .stats b { display: block; font-size: 1.15rem; }
+  .stats span { color: var(--muted); font-size: .8rem; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  details.tx { border-top: 1px solid var(--line); }
+  details.tx summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 1fr auto auto; gap: 14px;
+    align-items: center; padding: 11px 4px; }
+  details.tx summary::-webkit-details-marker { display: none; }
+  details.tx summary:hover { background: var(--field); }
+  .title { font-weight: 600; overflow-wrap: anywhere; }
+  .title::before { content: "▸ "; color: var(--muted); }
+  details[open] .title::before { content: "▾ "; }
+  .sub { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+  .pill { font-size: .78rem; font-weight: 600; padding: 2px 10px; border-radius: 999px; background: var(--chip); color: var(--muted); white-space: nowrap; }
+  .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.err { background: var(--err-bg); color: var(--err); }
+  .body { padding: 2px 4px 16px 20px; }
+  ol.timeline { list-style: none; margin: 0 0 12px; padding: 0 0 0 14px; border-left: 2px solid var(--line); }
+  ol.timeline li { position: relative; padding: 3px 0 3px 10px; font-size: .9rem; }
+  ol.timeline li::before { content: ""; position: absolute; left: -20px; top: 10px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+  ol.timeline time { color: var(--muted); font-size: .8rem; margin-right: 10px; display: inline-block; min-width: 118px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .empty { color: var(--muted); text-align: center; padding: 22px 0 6px; }
+  .acct { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .acct:first-of-type { border-top: 0; }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } .stats { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Plan Sender</h1>
+    <nav>
+      <button data-tab="send" class="active">Send</button>
+      <button data-tab="tx">Transactions</button>
+      <button data-tab="settings">Settings</button>
+    </nav>
+    <span class="spacer"></span>
+    <span class="badge hidden" id="test-badge" title="Using a Stripe test key: no real money moves">TEST MODE</span>
+  </header>
+
+  <div id="flash"></div>
+
+  <!-- ===================== SEND ===================== -->
+  <section id="tab-send">
+    <div class="notice warn hidden" id="setup-note">Finish setup first: add your Stripe key and an email account in <a href="#" data-goto="settings">Settings</a>.</div>
+    <div class="card">
+      <div class="grid">
+        <div>
+          <label for="f-from">From</label>
+          <select id="f-from"></select>
+        </div>
+        <div>
+          <label for="f-to">To <span class="opt">(client's email)</span></label>
+          <input id="f-to" type="email" placeholder="client@example.com">
+        </div>
+        <div>
+          <label for="f-name">Client name <span class="opt">(optional)</span></label>
+          <input id="f-name" type="text">
+        </div>
+        <div>
+          <label for="f-price">Price (USD)</label>
+          <input id="f-price" type="text" inputmode="decimal" placeholder="1500.00">
+        </div>
+        <div class="full">
+          <label for="f-title">Project name <span class="opt">(optional, defaults to the file name)</span></label>
+          <input id="f-title" type="text">
+        </div>
+        <div class="full">
+          <div class="pick" id="pick" role="button" tabindex="0">
+            <span style="font-size:1.8rem">📄</span>
+            <div><div class="name" id="pick-name">Choose the plan PDF…</div><div class="sub" id="pick-info">Click to browse</div></div>
+          </div>
+        </div>
+        <div class="full hidden" id="share-wrap">
+          <label for="f-share">Download link for the final PDF <span class="opt">(file too big to attach)</span></label>
+          <input id="f-share" type="url" placeholder="https://… (OneDrive / Dropbox / Google Drive share link)">
+          <div class="sub" style="margin-top:4px">Only emailed to the client after they pay. Don't share this link anywhere else.</div>
+        </div>
+        <div class="full">
+          <button class="btn big" id="send-btn">Send with pay wall</button>
+          <p class="small muted" style="text-align:center;margin:10px 0 0">The client gets a watermarked preview and a Stripe pay link. The real PDF is emailed to them automatically once they pay.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== TRANSACTIONS ===================== -->
+  <section id="tab-tx" class="hidden">
+    <div class="card">
+      <div class="stats">
+        <div><b id="t-sent">0</b><span>sent</span></div>
+        <div><b id="t-paid">0</b><span>paid</span></div>
+        <div><b id="t-collected">$0.00</b><span>collected</span></div>
+        <div><b id="t-waiting">$0.00</b><span>waiting on payment</span></div>
+      </div>
+      <div class="toolbar">
+        <button class="btn ghost" id="check-btn">Check for payments now</button>
+        <span class="small muted" id="last-check"></span>
+        <span class="spacer"></span>
+        <button class="btn ghost" id="csv-btn">Export log (CSV)</button>
+      </div>
+      <div id="tx-list"></div>
+    </div>
+  </section>
+
+  <!-- ===================== SETTINGS ===================== -->
+  <section id="tab-settings" class="hidden">
+    <div class="card">
+      <h2>1. Stripe <span class="pill" id="stripe-status">Not connected</span></h2>
+      <p class="small muted" style="margin-top:0">Copy your secret key from <a href="#" data-url="https://dashboard.stripe.com/apikeys">dashboard.stripe.com/apikeys</a>. Use a <b>test</b> key (sk_test_…) to try things out; switch to the live key when you're ready for real payments. It's stored in Windows Credential Manager.</p>
+      <div class="grid">
+        <div class="full"><input id="s-stripe" type="password" placeholder="sk_live_… or sk_test_… (leave blank to keep the current key)" autocomplete="off"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2. Email accounts <span class="opt small">(the "From" addresses)</span></h2>
+      <div id="acct-list"></div>
+      <details id="acct-add" style="margin-top:10px">
+        <summary class="btn ghost" style="display:inline-block">+ Add an email account</summary>
+        <div class="grid" style="margin-top:14px">
+          <div><label>Email provider</label><select id="a-preset"></select></div>
+          <div><label>Email address</label><input id="a-email" type="email"></div>
+          <div><label>Your name <span class="opt">(shown as the sender)</span></label><input id="a-name" type="text"></div>
+          <div><label>Password / app password</label><input id="a-pass" type="password" autocomplete="off"></div>
+          <div class="full small muted" id="a-help"></div>
+          <div class="hidden" id="a-custom-host"><label>SMTP server</label><input id="a-host" type="text" placeholder="smtp.example.com"></div>
+          <div class="hidden" id="a-custom-port"><label>Port / security</label>
+            <div style="display:flex;gap:8px"><input id="a-port" type="number" value="587" style="width:100px">
+              <select id="a-sec"><option value="starttls">STARTTLS</option><option value="ssl">SSL</option></select></div></div>
+          <div class="full"><button class="btn" id="a-save">Save account</button></div>
+        </div>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2>3. Your details <span class="opt small">(email signature)</span></h2>
+      <div class="grid">
+        <div><label>Name</label><input id="g-name" type="text" placeholder="Pat Lee"></div>
+        <div><label>Firm <span class="opt">(optional)</span></label><input id="g-firm" type="text"></div>
+        <div><label>PE license # <span class="opt">(optional)</span></label><input id="g-license" type="text"></div>
+        <div><label>Phone <span class="opt">(optional)</span></label><input id="g-phone" type="text"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>4. Options</h2>
+      <label class="check"><input type="checkbox" id="o-ach">Let clients pay by bank transfer (ACH): lower fees, takes 3–5 days to clear</label>
+      <label class="check"><input type="checkbox" id="o-startup">Start Plan Sender when Windows starts (recommended, so paid plans go out quickly)</label>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px" class="small">
+        Check Stripe for payments every <input id="o-poll" type="number" min="1" max="60" style="width:70px"> minutes
+      </div>
+      <p class="small muted">Your data is stored in <a href="#" id="data-dir"></a>.</p>
+    </div>
+    <button class="btn" id="settings-save">Save settings</button>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let api = null, state = null, chosen = null, presets = {};
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null) e.append(k.nodeType ? k : document.createTextNode(String(k)));
+  return e;
+}
+function flash(msg, tone = "ok") {
+  const box = $("flash"); box.replaceChildren(el("div", { class: `notice ${tone}` }, msg));
+  if (tone === "ok") setTimeout(() => { if (box.textContent === msg) box.replaceChildren(); }, 8000);
+  window.scrollTo(0, 0);
+}
+function fmt(ts) {
+  if (!ts) return "";
+  return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+function showTab(name) {
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  ["send", "tx", "settings"].forEach(t => $("tab-" + t).classList.toggle("hidden", t !== name));
+  $("flash").replaceChildren();
+  if (name === "tx") loadTransactions();
+}
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+document.addEventListener("click", (e) => {
+  const go = e.target.closest("[data-goto]"); if (go) { e.preventDefault(); showTab(go.dataset.goto); }
+  const url = e.target.closest("[data-url]"); if (url) { e.preventDefault(); api.open_url(url.dataset.url); }
+});
+
+// ------------------------------------------------------------ state & settings
+async function loadState() {
+  state = await api.state();
+  presets = state.presets;
+  const s = state.settings;
+  $("test-badge").classList.toggle("hidden", !s.test_mode);
+  $("setup-note").classList.toggle("hidden", !state.setup_needed);
+  const from = $("f-from"); from.replaceChildren();
+  if (!s.accounts.length) from.append(el("option", { value: "" }, "Add an email account in Settings"));
+  s.accounts.forEach(a => from.append(el("option", { value: a.email }, a.name ? `${a.name} <${a.email}>` : a.email)));
+  if (s.default_from) from.value = s.default_from;
+  const st = $("stripe-status");
+  st.textContent = s.stripe_connected ? (s.test_mode ? "Connected (test mode)" : "Connected (live)") : "Not connected";
+  st.className = "pill " + (s.stripe_connected ? (s.test_mode ? "warn" : "ok") : "err");
+  const list = $("acct-list"); list.replaceChildren();
+  if (!s.accounts.length) list.append(el("p", { class: "small muted", style: "margin:0" }, "No email accounts yet."));
+  s.accounts.forEach(a => list.append(el("div", { class: "acct" },
+    el("div", {}, el("div", { class: "title", style: "font-weight:600" }, a.email),
+      el("div", { class: "sub" }, `${(presets[a.preset] || {}).label || a.host}${a.has_password ? "" : " · password missing"}`)),
+    el("div", { class: "actions" },
+      el("button", { class: "btn ghost", onclick: async (e) => { e.target.disabled = true; const r = await api.test_email(a.email); e.target.disabled = false; flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err"); } }, "Send test email"),
+      el("button", { class: "btn ghost", onclick: async () => { if (confirm(`Remove ${a.email}?`)) { await api.remove_account(a.email); loadState(); } } }, "Remove")))));
+  const sig = s.signature || {};
+  $("g-name").value = sig.name || ""; $("g-firm").value = sig.firm || "";
+  $("g-license").value = sig.license || ""; $("g-phone").value = sig.phone || "";
+  $("o-ach").checked = !!s.allow_ach; $("o-startup").checked = !!s.start_with_windows;
+  $("o-poll").value = Math.round((s.poll_seconds || 120) / 60);
+  $("data-dir").textContent = state.data_dir;
+  const ps = $("a-preset"); if (!ps.options.length) {
+    Object.entries(presets).forEach(([k, p]) => ps.append(el("option", { value: k }, p.label)));
+    ps.addEventListener("change", presetChanged); presetChanged();
+  }
+}
+function presetChanged() {
+  const p = presets[$("a-preset").value] || {};
+  $("a-help").textContent = p.help || "";
+  const custom = $("a-preset").value === "custom";
+  $("a-custom-host").classList.toggle("hidden", !custom); $("a-custom-port").classList.toggle("hidden", !custom);
+}
+$("data-dir").addEventListener("click", (e) => { e.preventDefault(); api.open_data_folder(); });
+$("a-save").addEventListener("click", async () => {
+  const r = await api.save_account({ preset: $("a-preset").value, email: $("a-email").value, name: $("a-name").value,
+    password: $("a-pass").value, host: $("a-host").value, port: $("a-port").value, security: $("a-sec").value });
+  if (!r.ok) return flash(r.error, "err");
+  ["a-email", "a-name", "a-pass", "a-host"].forEach(id => $(id).value = "");
+  $("acct-add").open = false; await loadState(); flash("Email account saved. Use “Send test email” to check it works.");
+});
+$("settings-save").addEventListener("click", async () => {
+  const b = $("settings-save"); b.disabled = true; b.textContent = "Saving…";
+  const r = await api.save_settings({ stripe_key: $("s-stripe").value,
+    signature: { name: $("g-name").value, firm: $("g-firm").value, license: $("g-license").value, phone: $("g-phone").value },
+    allow_ach: $("o-ach").checked, start_with_windows: $("o-startup").checked, poll_minutes: $("o-poll").value });
+  b.disabled = false; b.textContent = "Save settings";
+  if (!r.ok) return flash(r.error, "err");
+  $("s-stripe").value = ""; await loadState(); flash("Settings saved.");
+});
+
+// ------------------------------------------------------------ send
+async function pickFile() {
+  const r = await api.choose_pdf();
+  if (!r.ok) return flash(r.error, "err");
+  if (!r.path) return;
+  chosen = r;
+  $("pick").classList.add("has");
+  $("pick-name").textContent = r.name;
+  $("pick-info").textContent = `${r.pages} page${r.pages === 1 ? "" : "s"} · ${r.size_mb} MB · click to change`;
+  $("share-wrap").classList.toggle("hidden", !r.too_big);
+}
+$("pick").addEventListener("click", pickFile);
+$("pick").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pickFile(); });
+$("send-btn").addEventListener("click", async () => {
+  const b = $("send-btn"); b.disabled = true; b.textContent = "Building preview and sending…";
+  const r = await api.send({ from_email: $("f-from").value, to_email: $("f-to").value, client_name: $("f-name").value,
+    title: $("f-title").value, price: $("f-price").value, pdf_path: chosen ? chosen.path : "", share_link: $("f-share").value });
+  b.disabled = false; b.textContent = "Send with pay wall";
+  if (!r.ok) { if (r.need_share_link) $("share-wrap").classList.remove("hidden"); return flash(r.error, "err"); }
+  ["f-to", "f-name", "f-title", "f-price", "f-share"].forEach(id => $(id).value = "");
+  chosen = null; $("pick").classList.remove("has"); $("pick-name").textContent = "Choose the plan PDF…";
+  $("pick-info").textContent = "Click to browse"; $("share-wrap").classList.add("hidden");
+  flash(r.message);
+});
+
+// ------------------------------------------------------------ transactions
+async function loadTransactions() {
+  const data = await api.transactions();
+  $("t-sent").textContent = data.totals.sent; $("t-paid").textContent = data.totals.paid;
+  $("t-collected").textContent = data.totals.collected; $("t-waiting").textContent = data.totals.waiting;
+  const open = new Set([...document.querySelectorAll("details.tx[open]")].map(d => d.dataset.id));
+  const list = $("tx-list"); list.replaceChildren();
+  if (!data.items.length) list.append(el("p", { class: "empty" }, "Nothing sent yet. Everything you send, and every update on it, is saved here."));
+  for (const t of data.items) {
+    const paid = t.status === "paid" || t.status === "refunded";
+    const actions = el("div", { class: "actions" });
+    if (!paid) actions.append(el("button", { class: "btn ghost", onclick: async (e) => { await navigator.clipboard.writeText(t.link_url); e.target.textContent = "Copied ✓"; } }, "Copy pay link"));
+    if (t.status !== "refunded") actions.append(el("button", { class: "btn ghost", onclick: async (e) => {
+      if (!confirm(paid ? `Email the final plans to ${t.client_email} again?` : `Email the pay link to ${t.client_email} again?`)) return;
+      e.target.disabled = true; const r = await api.resend(t.id); e.target.disabled = false;
+      flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err"); loadTransactions(); } }, paid ? "Resend final plans" : "Resend pay link"));
+    actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "preview") }, "Open preview"));
+    actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "final") }, "Open final PDF"));
+    const d = el("details", { class: "tx", "data-id": t.id },
+      el("summary", {},
+        el("div", {}, el("div", { class: "title" }, t.title),
+          el("div", { class: "sub" }, `to ${t.client_email}${t.client_name ? " (" + t.client_name + ")" : ""} · ${fmt(t.sent_at)}`)),
+        el("div", {}, t.price),
+        el("span", { class: `pill ${t.tone}` }, t.label)),
+      el("div", { class: "body" },
+        t.delivery_error ? el("div", { class: "notice err small" }, `Plans not sent yet: ${t.delivery_error}. Retrying automatically.`) : null,
+        el("ol", { class: "timeline" }, t.activity.map(a => el("li", {}, el("time", {}, fmt(a.ts)), a.text))),
+        el("div", { class: "sub", style: "margin-bottom:10px" }, `From ${t.from_email} · ${t.pages} pages · fingerprint ${t.sha256.slice(0, 12)}…${t.share_link ? " · delivered by link" : ""}`),
+        actions));
+    if (open.has(String(t.id))) d.open = true;
+    list.append(d);
+  }
+  const last = (await api.state()).last_check;
+  $("last-check").textContent = last ? `Last checked ${fmt(last)}` : "";
+}
+$("check-btn").addEventListener("click", async () => {
+  const b = $("check-btn"); b.disabled = true; b.textContent = "Checking…";
+  const r = await api.check_now(); b.disabled = false; b.textContent = "Check for payments now";
+  if (!r.ok) return flash(r.error, "err");
+  const s = r.summary; flash(s.paid ? `${s.paid} new payment${s.paid > 1 ? "s" : ""}! Plans sent: ${s.delivered}.` : "No new payments.");
+  if (s.errors.length) flash("Some checks failed: " + s.errors.join("; "), "err");
+  loadTransactions();
+});
+$("csv-btn").addEventListener("click", async () => {
+  const r = await api.export_csv(); if (r.ok && r.path) flash(`Saved ${r.path}`);
+});
+
+window.refreshFromPython = () => { if (!$("tab-tx").classList.contains("hidden")) loadTransactions(); };
+window.addEventListener("pywebviewready", async () => {
+  api = window.pywebview.api;
+  await loadState();
+  if (state.setup_needed) showTab("settings");
+  setInterval(window.refreshFromPython, 30000);
+});
+</script>
+</body>
+</html>

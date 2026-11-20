@@ -1,0 +1,11 @@
+{% autoescape off %}Subject: Updated plans issued (Rev {{ revision.number }}): {{ project.title }}
+
+Hi {{ project.client_name|default:"there" }},
+
+A new revision of your plans for {{ project.title }} has been issued{% if revision.notes %}: {{ revision.notes }}{% endif %}.
+
+Review it here: {{ portal_url }}
+
+{% include "plans/emails/_manifest.txt" %}
+
+{% include "plans/emails/_signature.txt" %}{% endautoescape %}

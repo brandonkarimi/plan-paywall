@@ -1,0 +1,9 @@
+{% autoescape off %}Subject: Refund issued: {{ project.title }}
+
+Hi {{ project.client_name|default:"there" }},
+
+Your payment for {{ project.title }} has been refunded in full{% if reason %} ({{ reason }}){% endif %}. Refunds usually appear on your statement within 5–10 business days.
+
+We're sorry for the trouble. Reply to this email and we'll make it right.
+
+{% include "plans/emails/_signature.txt" %}{% endautoescape %}

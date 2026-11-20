@@ -1,0 +1,168 @@
+{% extends "plans/base.html" %}
+{% block title %}Send plans{% endblock %}
+{% block content %}
+<style>
+  .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .top h1 { font-size: 1.4rem; margin: 0; }
+  .linkbtn { background: none; border: 0; color: var(--muted); cursor: pointer; font: inherit; font-size: .875rem; padding: 0; }
+  form.send { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+  form.send .full { grid-column: 1 / -1; }
+  label { display: block; font-weight: 600; font-size: .875rem; margin-bottom: 4px; }
+  label .opt { font-weight: 400; color: var(--muted); }
+  input[type=email], input[type=text], input[type=number] {
+    width: 100%; font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg); color: var(--text); }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .drop { display: block; border: 2px dashed var(--line); border-radius: 10px; padding: 22px; text-align: center;
+    cursor: pointer; color: var(--muted); }
+  .drop:hover, .drop.has-file { border-color: var(--accent); color: var(--text); }
+  .drop input { display: none; }
+  .err { color: var(--err); font-size: .85rem; margin-top: 4px; }
+  .send-btn { width: 100%; padding: 14px; font-size: 1.05rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: .8rem; padding: 0 8px 8px; }
+  td { padding: 10px 8px; border-top: 1px solid var(--line); vertical-align: middle; }
+  td .sub { color: var(--muted); font-size: .8rem; }
+  .empty { color: var(--muted); text-align: center; padding: 18px 0 4px; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+  .stats div { background: var(--bg); border-radius: 8px; padding: 10px 12px; }
+  .stats b { display: block; font-size: 1.15rem; }
+  .stats span { color: var(--muted); font-size: .8rem; }
+  details.tx { border-top: 1px solid var(--line); }
+  details.tx summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 1fr auto auto;
+    gap: 14px; align-items: center; padding: 12px 4px; }
+  details.tx summary::-webkit-details-marker { display: none; }
+  details.tx summary:hover { background: var(--bg); }
+  .tx-main { min-width: 0; }
+  .tx-title { font-weight: 600; overflow-wrap: anywhere; }
+  .tx-title::before { content: "▸ "; color: var(--muted); }
+  details[open] .tx-title::before { content: "▾ "; }
+  .tx-price { font-variant-numeric: tabular-nums; }
+  .sub { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+  .tx-body { padding: 0 4px 16px 18px; }
+  ol.timeline { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--line); }
+  ol.timeline li { position: relative; padding: 4px 0 4px 10px; font-size: .9rem; }
+  ol.timeline li::before { content: ""; position: absolute; left: -20px; top: 11px; width: 10px; height: 10px;
+    border-radius: 50%; background: var(--accent); }
+  ol.timeline time { color: var(--muted); font-size: .8rem; margin-right: 10px; display: inline-block; min-width: 105px; }
+  @media (max-width: 640px) {
+    form.send { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: 1fr 1fr; }
+    details.tx summary { grid-template-columns: 1fr auto; }
+    .tx-price { display: none; }
+  }
+</style>
+
+<div class="top">
+  <h1>Send plans</h1>
+</div>
+
+{% for message in messages %}<div class="notice {% if message.tags == 'error' %}err{% else %}ok{% endif %}">{{ message }}</div>{% endfor %}
+
+<div class="card">
+  <form class="send" method="post" action="{{ home }}" enctype="multipart/form-data" id="send-form">{% csrf_token %}
+    <div>
+      <label for="id_from_email">From</label>
+      {{ form.from_email }}
+      {% for e in form.from_email.errors %}<div class="err">{{ e }}</div>{% endfor %}
+    </div>
+    <div>
+      <label for="id_to_email">To <span class="opt">(client's email)</span></label>
+      {{ form.to_email }}
+      {% for e in form.to_email.errors %}<div class="err">{{ e }}</div>{% endfor %}
+    </div>
+    <div>
+      <label for="id_client_name">Client name <span class="opt">(optional)</span></label>
+      {{ form.client_name }}
+    </div>
+    <div>
+      <label for="id_price">Price (USD)</label>
+      {{ form.price }}
+      {% for e in form.price.errors %}<div class="err">{{ e }}</div>{% endfor %}
+    </div>
+    <div class="full">
+      <label for="id_title">Project name <span class="opt">(optional, defaults to the file name)</span></label>
+      {{ form.title }}
+    </div>
+    <div class="full">
+      <label class="drop" id="drop">
+        <span id="drop-text">Click to choose the plan PDF, or drop it here</span>
+        {{ form.pdf }}
+      </label>
+      {% for e in form.pdf.errors %}<div class="err">{{ e }}</div>{% endfor %}
+    </div>
+    <div class="full">
+      <button class="btn send-btn" type="submit" id="send-btn">Send with pay wall</button>
+      <p class="small muted" style="margin:10px 0 0;text-align:center">
+        Your client gets an email with a watermarked preview. The real PDF unlocks automatically after they pay.
+      </p>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="row" style="margin-bottom:14px">
+    <h2 style="margin:0">Transactions</h2>
+    {% if projects %}<a class="btn secondary" href="{{ csv_url }}" style="padding:6px 12px;font-size:.85rem">Download log (CSV)</a>{% endif %}
+  </div>
+  {% if projects %}
+  <div class="stats">
+    <div><b>{{ totals.sent }}</b><span>sent</span></div>
+    <div><b>{{ totals.paid }}</b><span>paid</span></div>
+    <div><b>${{ totals.collected|floatformat:"2g" }}</b><span>collected</span></div>
+    <div><b>${{ totals.outstanding|floatformat:"2g" }}</b><span>waiting on payment</span></div>
+  </div>
+  {% for p in projects %}
+  <details class="tx">
+    <summary>
+      <div class="tx-main">
+        <div class="tx-title">{{ p.title }}</div>
+        <div class="sub">to {{ p.client_email }}{% if p.client_name %} ({{ p.client_name }}){% endif %} · {{ p.sent_at|date:"M j, Y" }}</div>
+      </div>
+      <div class="tx-price">${{ p.price|floatformat:"2g" }}</div>
+      <div class="tx-status">
+        {% if p.status == "paid" %}<span class="pill ok">Paid</span>
+        {% elif p.status == "pending" %}<span class="pill warn">Bank transfer clearing</span>
+        {% elif p.status == "refunded" %}<span class="pill err">Refunded</span>
+        {% elif p.status == "viewed" %}<span class="pill">Opened, not paid</span>
+        {% else %}<span class="pill">Not paid yet</span>{% endif %}
+      </div>
+    </summary>
+    <div class="tx-body">
+      <ol class="timeline">
+        {% for a in p.activity.all %}
+        <li><time>{{ a.timestamp|date:"M j, g:i A" }}</time>{{ a.text }}</li>
+        {% empty %}
+        <li><time>{{ p.sent_at|date:"M j, g:i A" }}</time>Sent to {{ p.client_email }}</li>
+        {% endfor %}
+      </ol>
+      <div class="sub" style="margin-top:10px">
+        Sent from {{ p.from_email|default:"default address" }}{% if p.current_revision %} · {{ p.current_revision.page_count }} pages · fingerprint {{ p.current_revision.sha256|slice:":12" }}…{% endif %}
+      </div>
+      <button type="button" class="btn secondary copy" data-url="{{ p.portal_url }}" style="padding:4px 10px;font-size:.8rem;margin-top:10px">Copy client link</button>
+    </div>
+  </details>
+  {% endfor %}
+  {% else %}
+  <p class="empty">Nothing sent yet. Everything you send, and every update on it, is saved here.</p>
+  {% endif %}
+</div>
+
+<script>
+  const drop = document.getElementById("drop"), input = drop.querySelector("input[type=file]"),
+        text = document.getElementById("drop-text");
+  input.accept = "application/pdf";
+  const show = () => { if (input.files.length) { text.textContent = "📄 " + input.files[0].name; drop.classList.add("has-file"); } };
+  input.addEventListener("change", show);
+  drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("has-file"); });
+  drop.addEventListener("drop", e => { e.preventDefault(); input.files = e.dataTransfer.files; show(); });
+  document.getElementById("send-form").addEventListener("submit", () => {
+    const b = document.getElementById("send-btn"); b.disabled = true; b.textContent = "Sending… (building preview)";
+  });
+  document.querySelectorAll(".copy").forEach(b => b.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(b.dataset.url); b.textContent = "Copied ✓"; }
+    catch { prompt("Client link:", b.dataset.url); }
+    setTimeout(() => b.textContent = "Copy client link", 2000);
+  }));
+</script>
+{% endblock %}
