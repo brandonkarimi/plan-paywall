@@ -1,4 +1,4 @@
-"""Import the pictures used in client emails (payment QR codes, signature logo) and on previews (watermark logo).
+"""Import the pictures used in client emails (payment QR codes) and on previews (watermark logo).
 
 QR codes are read when they're chosen; emails redraw them from that text rather than attaching the picture."""
 import base64
@@ -10,7 +10,6 @@ from desktop import config
 from plancore.preview import transparent_logo
 
 QR_MAX_WIDTH = 600  # plenty to scan, small enough to keep the email light
-SIGNATURE_LOGO_HEIGHT = 180  # stored size; shown at half that in emails
 
 
 class ImageError(Exception):
@@ -31,14 +30,6 @@ def store(slot, source) -> Path:
         raise ImageError("That file isn't a picture this app can read. Use a PNG or JPG.") from exc
     if slot == "watermark":
         img = transparent_logo(img)
-    elif slot == "signature_logo":
-        img = img.convert("RGBA")
-        bbox = img.getchannel("A").getbbox()
-        if bbox:
-            img = img.crop(bbox)
-        if img.height > SIGNATURE_LOGO_HEIGHT:  # 2x the shown height: sharp on high-DPI screens, still small
-            img = img.resize((round(img.width * SIGNATURE_LOGO_HEIGHT / img.height), SIGNATURE_LOGO_HEIGHT),
-                             Image.LANCZOS)
     else:
         text = read_qr(img)
         if not text:

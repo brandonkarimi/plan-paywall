@@ -189,42 +189,42 @@ def test_delete_one_transaction_keeps_the_others(env):
     assert send(env) > gone  # ids are never reused
 
 
-def test_every_email_carries_the_signature_with_inline_logo(env):
-    from PIL import Image
-    from desktop import images, mailer
-    s = config.load_settings()
-    s["signature"] = {"name": "Pat Lee, MSCE, PE", "firm": "", "phone": "555-123-4567", "email": "pat@acmecivil.test",
-                      "license": "C12345", "street": "1 Main St #2", "city": "Springfield CA 90000"}
-    config.save_settings(s)
-    logo = env["tmp"] / "logo.png"
-    Image.new("RGB", (800, 400), "navy").save(logo)
-    images.store("signature_logo", logo)
-    with Image.open(config.image_path("signature_logo")) as stored:
-        assert stored.height == images.SIGNATURE_LOGO_HEIGHT
+def test_every_email_carries_the_signature_with_linked_logo(env):
+    from desktop import mailer
+    from desktop.api import Api
+    logo_url = "https://lh3.googleusercontent.com/abc123=s200"
+    assert Api().save_settings({"signature": {
+        "name": "Pat Lee, MSCE, PE", "firm": "", "phone": "555-123-4567", "email": "pat@acmecivil.test",
+        "license": "C12345", "street": "1 Main St #2", "city": "Springfield CA 90000", "logo_url": logo_url}})["ok"]
 
     tx_id = send(env)
     sender.mark_paid(tx_id, "Zelle")
     for msg in env["smtp"].sent:  # preview email and final-plans email
         text = body(msg)
         assert "Pat Lee, MSCE, PE\nCell: 555-123-4567\npat@acmecivil.test\nPE Lic#: C12345\n1 Main St #2\nSpringfield CA 90000" in text
-        assert "P.E." not in text
+        assert "P.E." not in text and "googleusercontent" not in text
         html = msg.get_body(("html",)).get_content()
-        assert f"cid:{mailer.SIGNATURE_LOGO_CID}" in html and "tel:5551234567" in html and "mailto:pat@acmecivil.test" in html
-        inline = [p for p in msg.walk() if p.get("Content-ID") == f"<{mailer.SIGNATURE_LOGO_CID}>"]
-        assert len(inline) == 1 and inline[0].get_content_type() == "image/png"
-        assert inline[0].get_content_disposition() == "inline" and inline[0].get_filename() is None
-        assert all(not (n or "").endswith(".png") for n, _ in attachments(msg))  # the logo isn't a separate attachment
-        # Gmail's own layout: mixed > related > (alternative, logo), then the PDFs.
-        related = msg.get_payload()[0] if msg.get_content_type() == "multipart/mixed" else msg
-        assert related.get_content_type() == "multipart/related"
-        assert [p.get_content_type() for p in related.get_payload()] == ["multipart/alternative", "image/png"]
+        assert f"src='{logo_url}'" in html and "tel:5551234567" in html and "mailto:pat@acmecivil.test" in html
+        # The logo is linked, never carried: no picture inside the email for Gmail to list as an attachment.
+        assert not [p for p in msg.walk() if p.get_content_maintype() == "image"]
+        assert "cid:" not in html
 
-    images.remove("signature_logo")
+    # Without a logo link there's no picture at all.
+    assert Api().save_settings({"signature": {"logo_url": ""}})["ok"]
     env["smtp"].sent.clear()
     send(env)
-    msg = env["smtp"].sent[0]
-    assert "cid:" not in msg.get_body(("html",)).get_content()
-    assert not [p for p in msg.walk() if p.get_content_maintype() == "image"]
+    assert "<img" not in env["smtp"].sent[0].get_body(("html",)).get_content()
+
+
+def test_logo_link_must_be_a_web_address(env):
+    from desktop.api import Api
+    from desktop import mailer
+    for bad in ("C:\\logo.png", "javascript:alert(1)", "logo.png", "https://x.test/a b.png"):
+        r = Api().save_settings({"signature": {"logo_url": bad}})
+        assert not r["ok"] and "https://" in r["error"]
+        assert "<img" not in mailer.signature_html({"signature": {"name": "Pat", "logo_url": bad}})
+    assert Api().save_settings({"signature": {"logo_url": "https://mkd.test/logo.png"}})["ok"]
+    assert config.load_settings()["signature"]["name"] == "Pat Lee"  # other signature fields are kept
 
 
 def test_signature_preview_and_empty_signature(env):

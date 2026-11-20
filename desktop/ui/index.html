@@ -354,7 +354,9 @@
         <div></div>
         <div><label>Street address <span class="opt">(optional)</span></label><input id="g-street" type="text" placeholder="123 Main St #100"></div>
         <div><label>City, state, ZIP <span class="opt">(optional)</span></label><input id="g-city" type="text" placeholder="Springfield CA 90000"></div>
-        <div class="full" data-picture="signature_logo" data-wide="1" data-hint="Shown on the left of your signature, like in Outlook."></div>
+        <div class="full"><label>Logo web address <span class="opt">(optional)</span></label>
+          <input id="g-logo_url" type="url" placeholder="https://… link to your logo picture online">
+          <div class="sub" style="margin-top:4px">Shown on the left of your signature. If your Gmail signature has your logo, open an email you sent, right-click the logo and choose “Copy image address”. A link to the logo on your website works too.</div></div>
         <div class="full"><label>Preview</label><div class="sig-preview" id="sig-preview"></div></div>
       </div>
     </div>
@@ -546,8 +548,8 @@ function renderPictures() {
     const slot = box.dataset.picture, src = state.images[slot];
     const thumb = el("div", { class: "thumb" + (box.dataset.wide ? " wide" : "") }, src ? "" : "None");
     if (src) thumb.style.backgroundImage = `url(${src})`;
-    const done = (r) => { if (!r.ok) return flash(r.error, "err"); if (r.state) { state = r.state; renderPictures(); updateSigPreview(); } };
-    box.replaceChildren(el("label", {}, { zelle_qr: "Zelle QR code", venmo_qr: "Venmo QR code", watermark: "Watermark logo", signature_logo: "Signature logo" }[slot],
+    const done = (r) => { if (!r.ok) return flash(r.error, "err"); if (r.state) { state = r.state; renderPictures(); } };
+    box.replaceChildren(el("label", {}, { zelle_qr: "Zelle QR code", venmo_qr: "Venmo QR code", watermark: "Watermark logo" }[slot],
         el("span", { class: "opt" }, " (optional)")),
       el("div", { class: "picture" }, thumb, el("div", {},
         el("div", { class: "actions" },
@@ -556,7 +558,7 @@ function renderPictures() {
         el("div", { class: "sub", style: "margin-top:6px" }, box.dataset.hint))));
   });
 }
-const SIG_FIELDS = ["name", "firm", "phone", "email", "license", "street", "city"];
+const SIG_FIELDS = ["name", "firm", "phone", "email", "license", "street", "city", "logo_url"];
 function sigValues() { return Object.fromEntries(SIG_FIELDS.map(k => [k, $("g-" + k).value])); }
 let sigTimer = null;
 function updateSigPreview() {
