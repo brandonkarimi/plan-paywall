@@ -244,6 +244,14 @@ class Api:
         config.save_settings(settings)
         return _ok(state=self.state())
 
+    def set_theme(self, theme):
+        if theme not in ("light", "dark"):
+            return _err("Unknown theme.")
+        settings = config.load_settings()
+        settings["theme"] = theme
+        config.save_settings(settings)
+        return _ok(theme=theme)
+
     def choose_image(self, slot):
         """Pick a picture (QR code or watermark logo) and copy it into the app."""
         import webview

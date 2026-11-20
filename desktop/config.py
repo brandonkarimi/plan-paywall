@@ -35,6 +35,7 @@ DEFAULT_SETTINGS = {
     "venmo": {"enabled": False, "username": ""},
     "preview_dpi": 100,
     "seal_box": "",
+    "theme": "light",        # "light" (blue and white) or "dark"
 }
 
 

@@ -174,6 +174,18 @@ def test_api_accounts_totals_and_csv(env, tmp_path):
     assert not a.save_settings({"zelle": {"enabled": True, "recipient": ""}})["ok"]
 
 
+def test_theme_defaults_to_light_and_is_remembered(env):
+    from desktop.api import Api
+    a = Api()
+    assert a.state()["settings"]["theme"] == "light"
+    assert a.set_theme("dark")["ok"]
+    assert config.load_settings()["theme"] == "dark"
+    assert a.save_settings({"signature": {"name": "Pat"}})["ok"]   # other saves keep the choice
+    assert config.load_settings()["theme"] == "dark"
+    assert not a.set_theme("purple")["ok"]
+    assert config.load_settings()["theme"] == "dark"
+
+
 def test_api_send_reports_errors_instead_of_raising(env):
     from desktop.api import Api
 
