@@ -1,6 +1,6 @@
 """Build a review-only preview of a plan set.
 
-Every page is rendered to a bitmap, covered with a tiled diagonal watermark plus a solid banner,
+Every page is rendered to a bitmap, covered with a tiled diagonal watermark,
 and reassembled into an image-only PDF. The result has no text layer and no vector geometry, so it
 can't be edited back into a usable plan, measured precisely, or traced in CAD.
 """
@@ -12,7 +12,6 @@ import img2pdf
 import pypdfium2 as pdfium
 from PIL import Image, ImageDraw, ImageFont
 
-BANNER_TEXT = "PRELIMINARY – NOT FOR CONSTRUCTION – PREVIEW ONLY"
 MAX_PIXELS = 40_000_000  # cap per page so a giant sheet can't exhaust memory
 
 
@@ -36,7 +35,7 @@ def _parse_box(box):
 
 
 def watermark_page(img, text, seal_box=None):
-    """Return an RGB copy of ``img`` with tiled watermark, top/bottom banners and optional seal cover."""
+    """Return an RGB copy of ``img`` with a tiled diagonal watermark and an optional seal cover."""
     img = img.convert("RGB")
     w, h = img.size
     short = min(w, h)
@@ -57,18 +56,10 @@ def watermark_page(img, text, seal_box=None):
     layer = layer.crop((left, top, left + w, top + h))
     out = Image.alpha_composite(img.convert("RGBA"), layer)
 
-    # 2. Solid banners top and bottom.
-    draw = ImageDraw.Draw(out)
-    band = max(24, h // 30)
-    bfont = _font(int(band * 0.6))
-    for y0 in (0, h - band):
-        draw.rectangle([0, y0, w, y0 + band], fill=(200, 30, 30, 255))
-        bw = draw.textbbox((0, 0), BANNER_TEXT, font=bfont)[2]
-        draw.text(((w - bw) // 2, y0 + band * 0.18), BANNER_TEXT, font=bfont, fill=(255, 255, 255, 255))
-
-    # 3. Optional solid cover over the seal/signature area.
+    # 2. Optional solid cover over the seal/signature area.
     box = _parse_box(seal_box)
     if box:
+        draw = ImageDraw.Draw(out)
         l, t, r, b = box
         rect = [int(l * w), int(t * h), int(r * w), int(b * h)]
         draw.rectangle(rect, fill=(235, 235, 235, 255), outline=(200, 30, 30, 255), width=4)

@@ -102,18 +102,7 @@ def _wrap(paragraphs, settings, button=None):
 
 
 def _greeting(tx):
-    return f"Hi {tx['client_name'] or 'there'},"
-
-
-def _manifest(tx):
-    lines = [f"Sheets: {tx['pages']} page{'s' if tx['pages'] != 1 else ''}"]
-    sheets = tx.get("sheets") or []
-    if sheets and not all(s.startswith("Sheet ") for s in sheets):
-        lines += [f"  • {s}" for s in sheets[:40]]
-        if len(sheets) > 40:
-            lines.append(f"  … and {len(sheets) - 40} more")
-    lines.append(f"File fingerprint (SHA-256): {tx['sha256']}")
-    return lines
+    return f"Hello {tx['client_name']}," if tx.get("client_name") else "Hello,"
 
 
 def venmo_link(username, cents, note):
@@ -123,50 +112,39 @@ def venmo_link(username, cents, note):
 
 
 def invite(tx, settings):
+    """The preview email: greeting, one short message, how to pay. The preview PDF is attached by the sender."""
     price = money(tx["price_cents"])
-    ref = tx.get("ref_code") or f"PLN-{tx['id']}"
     methods = tx.get("methods") or []
-    intro = (f"Your plans for {tx['title']} are ready. A watermarked preview of every sheet is attached for "
-             f"review. The final PDF is emailed to you once payment of {price} is received.")
-    paragraphs, buttons = [_greeting(tx), intro], []
-    many = len(methods) > 1
+    paragraphs = [_greeting(tx),
+                  f"Here is a preview of your plans for {tx['title']}. To receive the full PDF, please pay {price}."]
+    buttons = []
     if "zelle" in methods:
         z = settings.get("zelle") or {}
-        who = z.get("recipient", "")
         name = f" ({z['name']})" if z.get("name") else ""
-        paragraphs.append([("Option: " if many else "") + "Pay with Zelle (no fees):",
-                           f"  Send {price} to {who}{name}",
-                           f"  Memo: {ref}"])
+        paragraphs.append(f"Zelle: send {price} to {z.get('recipient', '')}{name}")
     if "venmo" in methods:
-        v = settings.get("venmo") or {}
-        user = v.get("username", "").strip().lstrip("@")
-        p = [("Option: " if many else "") + f"Pay with Venmo: send {price} to @{user} with the note {ref}."]
+        user = (settings.get("venmo") or {}).get("username", "").strip().lstrip("@")
+        p = f"Venmo: send {price} to @{user}"
         paragraphs.append(p)
+        # The reference is pre-filled in Venmo's note so the payment is easy to match; the client doesn't type it.
+        note = f"{tx.get('ref_code') or 'PLN-' + str(tx['id'])} {tx['title']}"
         buttons.append({"after": p, "label": f"Pay {price} with Venmo", "color": "#008cff",
-                        "url": venmo_link(user, tx["price_cents"], f"{ref} {tx['title']}")})
-    paragraphs.append(f"Please include {ref} with your payment so we can match it. Once it's received "
-                      "(usually the same day), the final PDF is emailed to this address.")
-    paragraphs += [
-        _manifest(tx),
-        "The fingerprint above identifies the exact final file you'll receive; you can check it after downloading "
-        "(Windows: certutil -hashfile file.pdf SHA256, Mac: shasum -a 256 file.pdf).",
-    ]
+                        "url": venmo_link(user, tx["price_cents"], note)})
+    paragraphs.append("Once payment is received, the full PDF will be emailed to you.")
     text, html = _wrap(paragraphs, settings, buttons)
-    return f"Plans ready for review: {tx['title']}", text, html
+    return f"Preview: {tx['title']}", text, html
 
 
 def files(tx, settings):
-    paid = money(tx["amount_paid_cents"] or tx["price_cents"])
+    """The final-plans email, sent once the engineer marks the payment received."""
     if tx.get("share_link"):
-        body = f"Thank you, your payment of {paid} was received. Download the final plans here:"
-        button = {"after": body, "label": "Download final plans", "url": tx["share_link"]}
+        body = f"Thank you for your payment. Download the full plans for {tx['title']} here:"
+        button = {"after": body, "label": "Download plans", "url": tx["share_link"]}
     else:
-        body = f"Thank you, your payment of {paid} was received. The final plans are attached."
+        body = f"Thank you for your payment. The full plans for {tx['title']} are attached."
         button = None
-    paragraphs = [_greeting(tx), body, _manifest(tx),
-                  "Please keep this email for your records."]
-    text, html = _wrap(paragraphs, settings, button)
-    return f"Your final plans: {tx['title']}", text, html
+    text, html = _wrap([_greeting(tx), body], settings, button)
+    return f"Plans: {tx['title']}", text, html
 
 
 def test_message(settings):

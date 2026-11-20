@@ -37,9 +37,13 @@ def test_send_emails_preview_and_instructions_but_never_the_final(env):
     (msg,) = env["smtp"].sent
     assert msg["To"] == "client@example.com" and msg["Reply-To"] == "pat@acmecivil.test"
     text = body(msg)
-    assert "Hi Jo Smith," in text and tx["sha256"] in text
-    assert "Send $1,500.00 to pat@acmecivil.test (Pat Lee)" in text and f"Memo: PLN-{tx_id}" in text
+    assert text.startswith("Hello Jo Smith,")
+    assert "Here is a preview of your plans for Lot 7 Grading. To receive the full PDF, please pay $1,500.00." in text
+    assert "Zelle: send $1,500.00 to pat@acmecivil.test (Pat Lee)" in text
     assert f"https://venmo.com/AcmeCivil-Eng?txn=pay&amount=1500.00&note=PLN-{tx_id}%20Lot%207%20Grading" in text
+    assert "Once payment is received, the full PDF will be emailed to you." in text
+    for detail in (tx["sha256"], "fingerprint", "Sheets:", "Memo"):  # no extra details any more
+        assert detail not in text
     (name, data), = attachments(msg)
     assert name.startswith("PREVIEW") and data != original
     assert log_texts(tx_id)[0].startswith("Sent to client@example.com from pat@acmecivil.test ($1,500.00, 3 pages)")
@@ -103,6 +107,7 @@ def test_mark_paid_delivers_final_once(env):
     (msg,) = env["smtp"].sent
     (name, data), = attachments(msg)
     assert name == "Lot 7 Grading.pdf" and data == env["pdf"].read_bytes()
+    assert body(msg).startswith("Hello Jo Smith,\n\nThank you for your payment. The full plans for Lot 7 Grading are attached.")
     with pytest.raises(sender.SendError, match="already marked paid"):
         sender.mark_paid(tx_id, "Zelle")
     assert len(env["smtp"].sent) == 1
@@ -133,10 +138,10 @@ def test_failed_delivery_is_reported_and_resend_fixes_it(env):
 def test_resend(env):
     tx_id = send(env)
     sender.resend(tx_id)
-    assert env["smtp"].sent[-1]["Subject"].startswith("Plans ready for review")
+    assert env["smtp"].sent[-1]["Subject"] == "Preview: Lot 7 Grading"
     sender.mark_paid(tx_id, "Cash")
     sender.resend(tx_id)
-    assert env["smtp"].sent[-1]["Subject"].startswith("Your final plans")
+    assert env["smtp"].sent[-1]["Subject"] == "Plans: Lot 7 Grading"
     assert "Final plans re-sent to client@example.com" in log_texts(tx_id)
 
 
@@ -218,3 +223,8 @@ def test_reset_log_requires_confirmation_and_never_reuses_refs(env):
 
     t3 = send(env, to_email="c@example.com")
     assert t3 == 3 and db.get_tx(t3)["ref_code"] == "PLN-3"  # numbering continues; PLN-1 is never reused
+
+
+def test_greeting_without_client_name(env):
+    send(env, client_name="")
+    assert body(env["smtp"].sent[0]).startswith("Hello,\n")

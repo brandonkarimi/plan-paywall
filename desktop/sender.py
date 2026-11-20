@@ -31,8 +31,7 @@ def _price_cents(price) -> int:
     return int((value * 100).quantize(Decimal("1")))
 
 
-def watermark_text(client_name, client_email):
-    return f"PRELIMINARY – NOT FOR CONSTRUCTION  ·  {client_name or client_email}"
+WATERMARK_TEXT = "PREVIEW"
 
 
 def make_preview(final_path: Path, out_path: Path, text: str, settings) -> Path:
@@ -100,7 +99,7 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
     try:
         final = folder / "final.pdf"
         shutil.copy2(src, final)
-        preview = make_preview(final, folder / "preview.pdf", watermark_text(client_name, to_email), settings)
+        preview = make_preview(final, folder / "preview.pdf", WATERMARK_TEXT, settings)
         db.update_tx(tx_id, final_path=str(final), preview_path=str(preview))
         subject, text, html = mailer.invite(db.get_tx(tx_id), settings)
         mailer.send(from_email, to_email, subject, text, html,
