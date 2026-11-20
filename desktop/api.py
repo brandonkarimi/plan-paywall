@@ -108,8 +108,8 @@ class Api:
             log.exception("Send failed")
             return _err(f"Unexpected error: {exc}")
         tx = db.get_tx(tx_id)
-        return _ok(message=f"Sent “{tx['title']}” to {tx['client_email']} (ref {tx['ref_code']}). When their "
-                           f"payment arrives, open Transactions and click Mark as paid.")
+        return _ok(tx_id=tx_id, message=f"Sent “{tx['title']}” to {tx['client_email']} (ref {tx['ref_code']}). "
+                                        f"When their payment arrives, click Mark as paid below.")
 
     def mark_paid(self, tx_id, method, amount="", allow_short=False):
         try:

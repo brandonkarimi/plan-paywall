@@ -110,6 +110,8 @@
     align-items: center; padding: 12px 6px; border-radius: 10px; }
   details.tx summary::-webkit-details-marker { display: none; }
   details.tx summary:hover { background: var(--brand-soft); }
+  details.tx.new summary { background: var(--brand-soft); animation: fadein 2.5s ease-out; }
+  @keyframes fadein { from { box-shadow: 0 0 0 2px var(--brand); } to { box-shadow: 0 0 0 2px transparent; } }
   .title { font-weight: 600; overflow-wrap: anywhere; }
   .title::before { content: "▸ "; color: var(--brand); }
   details[open] .title::before { content: "▾ "; }
@@ -306,8 +308,8 @@ function showTab(name) {
   $("gear").classList.toggle("active", name === "settings");
   ["send", "tx", "settings"].forEach(t => $("tab-" + t).classList.toggle("hidden", t !== name));
   $("flash").replaceChildren();
-  if (name === "tx") loadTransactions();
   if (name === "settings") setupMode(state && state.setup_needed);
+  if (name === "tx") return loadTransactions();
 }
 function setupMode(firstRun) {
   // First run: a welcome screen with no way out until it's done. Later: plain settings with Save / Back.
@@ -422,6 +424,10 @@ $("send-btn").addEventListener("click", async () => {
   ["f-to", "f-name", "f-title", "f-price", "f-share"].forEach(id => $(id).value = "");
   chosen = null; $("pick").classList.remove("has"); $("pick-name").textContent = "Choose the plan PDF…";
   $("pick-info").textContent = "Click to browse"; $("share-wrap").classList.add("hidden");
+  // Jump to the log with the new send opened, so it's obvious where it went.
+  await showTab("tx");
+  const row = document.querySelector(`details.tx[data-id="${r.tx_id}"]`);
+  if (row) { row.open = true; row.classList.add("new"); }
   flash(r.message);
 });
 
