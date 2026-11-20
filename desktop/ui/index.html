@@ -110,6 +110,10 @@
   .picture .thumb { width: 72px; height: 72px; flex: none; border: 1px solid var(--line); border-radius: 10px;
     background: #fff center / contain no-repeat; display: grid; place-items: center; color: var(--muted); font-size: .75rem; }
   .picture .thumb.wide { width: 120px; }
+  /* Emails are white, so the signature preview stays white in dark mode too. */
+  .sig-preview { background: #fff; color: #16191d; border: 1px solid var(--line); border-radius: 10px; padding: 0 18px 18px;
+    min-height: 60px; overflow-x: auto; }
+  .sig-preview:empty::before { content: "Fill in the fields above to see your signature."; display: block; padding-top: 18px; color: #6b7280; font-size: .85rem; }
 
   /* ---------- transactions ---------- */
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
@@ -327,12 +331,19 @@
     </div>
 
     <div class="card">
-      <h2><span class="step">3</span>Your details <span class="opt small">(email signature)</span></h2>
+      <h2><span class="step">3</span>Your email signature</h2>
+      <p class="small muted" style="margin:-6px 0 14px">Added to the bottom of every email the app sends. Leave out anything you don't want shown.</p>
       <div class="grid">
-        <div><label>Name</label><input id="g-name" type="text" placeholder="Pat Lee"></div>
+        <div><label>Name and credentials</label><input id="g-name" type="text" placeholder="Pat Lee, MSCE, PE"></div>
         <div><label>Firm <span class="opt">(optional)</span></label><input id="g-firm" type="text"></div>
+        <div><label>Cell phone <span class="opt">(optional)</span></label><input id="g-phone" type="text" placeholder="555-123-4567"></div>
+        <div><label>Email <span class="opt">(optional)</span></label><input id="g-email" type="email" placeholder="you@yourfirm.com"></div>
         <div><label>PE license # <span class="opt">(optional)</span></label><input id="g-license" type="text"></div>
-        <div><label>Phone <span class="opt">(optional)</span></label><input id="g-phone" type="text"></div>
+        <div></div>
+        <div><label>Street address <span class="opt">(optional)</span></label><input id="g-street" type="text" placeholder="123 Main St #100"></div>
+        <div><label>City, state, ZIP <span class="opt">(optional)</span></label><input id="g-city" type="text" placeholder="Springfield CA 90000"></div>
+        <div class="full" data-picture="signature_logo" data-wide="1" data-hint="Shown on the left of your signature, like in Outlook."></div>
+        <div class="full"><label>Preview</label><div class="sig-preview" id="sig-preview"></div></div>
       </div>
     </div>
 
@@ -440,7 +451,7 @@ function setupMode(firstRun) {
   $("nav").classList.toggle("hidden", firstRun);
   $("gear").classList.toggle("hidden", firstRun);
   $("setup-title").textContent = firstRun ? "Welcome to Plan Sender" : "Settings";
-  $("setup-sub").textContent = firstRun ? "Three quick steps and you're ready to send plans." : "Change how clients pay you, your email account or your signature.";
+  $("setup-sub").textContent = firstRun ? "Three quick steps and you're ready to send plans." : "Change how clients pay you, your email account or your email signature.";
   $("settings-save").textContent = firstRun ? "Finish setup" : "Save changes";
   $("settings-back").classList.toggle("hidden", firstRun);
   if (firstRun && state && !state.settings.accounts.length) $("acct-add").open = true;
@@ -480,8 +491,8 @@ async function loadState() {
         await api.remove_account(a.email); loadState(); } }, "Remove")))));
   renderPictures();
   const sig = s.signature || {};
-  $("g-name").value = sig.name || ""; $("g-firm").value = sig.firm || "";
-  $("g-license").value = sig.license || ""; $("g-phone").value = sig.phone || "";
+  SIG_FIELDS.forEach(k => $("g-" + k).value = sig[k] || "");
+  updateSigPreview();
   const ps = $("a-preset"); if (!ps.options.length) {
     Object.entries(presets).forEach(([k, p]) => ps.append(el("option", { value: k }, p.label)));
     ps.addEventListener("change", presetChanged); presetChanged();
@@ -493,8 +504,8 @@ function renderPictures() {
     const slot = box.dataset.picture, src = state.images[slot];
     const thumb = el("div", { class: "thumb" + (box.dataset.wide ? " wide" : "") }, src ? "" : "None");
     if (src) thumb.style.backgroundImage = `url(${src})`;
-    const done = (r) => { if (!r.ok) return flash(r.error, "err"); if (r.state) { state = r.state; renderPictures(); } };
-    box.replaceChildren(el("label", {}, { zelle_qr: "Zelle QR code", venmo_qr: "Venmo QR code", watermark: "Watermark logo" }[slot],
+    const done = (r) => { if (!r.ok) return flash(r.error, "err"); if (r.state) { state = r.state; renderPictures(); updateSigPreview(); } };
+    box.replaceChildren(el("label", {}, { zelle_qr: "Zelle QR code", venmo_qr: "Venmo QR code", watermark: "Watermark logo", signature_logo: "Signature logo" }[slot],
         el("span", { class: "opt" }, " (optional)")),
       el("div", { class: "picture" }, thumb, el("div", {},
         el("div", { class: "actions" },
@@ -503,6 +514,14 @@ function renderPictures() {
         el("div", { class: "sub", style: "margin-top:6px" }, box.dataset.hint))));
   });
 }
+const SIG_FIELDS = ["name", "firm", "phone", "email", "license", "street", "city"];
+function sigValues() { return Object.fromEntries(SIG_FIELDS.map(k => [k, $("g-" + k).value])); }
+let sigTimer = null;
+function updateSigPreview() {
+  clearTimeout(sigTimer);
+  sigTimer = setTimeout(async () => { if (api) $("sig-preview").innerHTML = await api.signature_preview(sigValues()); }, 150);
+}
+SIG_FIELDS.forEach(k => $("g-" + k).addEventListener("input", updateSigPreview));
 function toggleMethodFields() {
   $("m-zelle-fields").classList.toggle("hidden", !$("m-zelle").checked);
   $("m-venmo-fields").classList.toggle("hidden", !$("m-venmo").checked);
@@ -527,7 +546,7 @@ $("settings-save").addEventListener("click", async () => {
   const r = await api.save_settings({
     zelle: { enabled: $("m-zelle").checked, recipient: $("m-zelle-to").value, name: $("m-zelle-name").value },
     venmo: { enabled: $("m-venmo").checked, username: $("m-venmo-user").value },
-    signature: { name: $("g-name").value, firm: $("g-firm").value, license: $("g-license").value, phone: $("g-phone").value },
+    signature: sigValues(),
   });
   b.disabled = false;
   if (!r.ok) return flash(r.error, "err");

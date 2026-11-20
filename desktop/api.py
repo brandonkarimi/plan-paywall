@@ -244,6 +244,12 @@ class Api:
         config.save_settings(settings)
         return _ok(state=self.state())
 
+    def signature_preview(self, signature):
+        """The email signature as clients will see it, for the live preview in Settings."""
+        logo = images.thumbnails().get("signature_logo") or None
+        sig = {k: str(v) for k, v in (signature or {}).items()}
+        return mailer.signature_html({"signature": sig}, logo)
+
     def set_theme(self, theme):
         if theme not in ("light", "dark"):
             return _err("Unknown theme.")

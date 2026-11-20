@@ -31,6 +31,11 @@ def send(from_email, to, subject, text, html=None, attachments=(), settings=None
     msg.set_content(text)
     if html:
         msg.add_alternative(html, subtype="html")
+        logo = config.image_path("signature_logo")
+        if logo and f"cid:{SIGNATURE_LOGO_CID}" in html:  # the signature logo travels inside the message
+            msg.get_payload()[1].add_related(logo.read_bytes(), maintype="image", subtype="png",
+                                             cid=f"<{SIGNATURE_LOGO_CID}>", filename="logo.png",
+                                             disposition="inline")
     for path, filename in attachments:
         msg.add_attachment(Path(path).read_bytes(), maintype="application", subtype="pdf", filename=filename)
 
@@ -61,18 +66,56 @@ def money(cents) -> str:
     return f"${cents / 100:,.2f}"
 
 
+SIGNATURE_LOGO_CID = "plansender-signature-logo"
+SIG_LINK = "color:#1a56db;text-decoration:underline"
+
+
 def _signature(settings):
-    sig = settings.get("signature") or {}
-    lines = []
-    if sig.get("name"):
-        lines.append(sig["name"] + (", P.E." if sig.get("license") else ""))
-    if sig.get("firm"):
-        lines.append(sig["firm"])
-    if sig.get("license"):
-        lines.append(f"PE License #{sig['license']}")
+    """Plain-text signature lines."""
+    sig = {k: str(v).strip() for k, v in (settings.get("signature") or {}).items()}
+    lines = [sig[k] for k in ("name", "firm") if sig.get(k)]
     if sig.get("phone"):
-        lines.append(sig["phone"])
+        lines.append(f"Cell: {sig['phone']}")
+    if sig.get("email"):
+        lines.append(sig["email"])
+    if sig.get("license"):
+        lines.append(f"PE Lic#: {sig['license']}")
+    lines += [sig[k] for k in ("street", "city") if sig.get(k)]
     return lines
+
+
+def signature_html(settings, logo_src=None):
+    """The signature as it appears in emails: logo on the left, a dividing line, then the details.
+    ``logo_src`` is the logo's address (an inline-attachment cid in emails, a data URL in the Settings preview)."""
+    from urllib.parse import quote
+
+    sig = {k: str(v).strip() for k, v in (settings.get("signature") or {}).items()}
+    rows = []
+    if sig.get("name"):
+        rows.append(f"<div style='font-family:Cambria,Georgia,serif;font-weight:700;font-size:16px;color:#0f1f3d'>"
+                    f"{escape(sig['name'])}</div>")
+    if sig.get("firm"):
+        rows.append(f"<div>{escape(sig['firm'])}</div>")
+    if sig.get("phone"):
+        digits = "".join(c for c in sig["phone"] if c.isdigit() or c == "+")
+        rows.append(f"<div>Cell: <a href='tel:{escape(digits)}' style='{SIG_LINK}'>{escape(sig['phone'])}</a></div>")
+    if sig.get("email"):
+        rows.append(f"<div><a href='mailto:{escape(sig['email'])}' style='{SIG_LINK}'>{escape(sig['email'])}</a></div>")
+    if sig.get("license"):
+        rows.append(f"<div>PE Lic#: <span style='color:#1a56db'>{escape(sig['license'])}</span></div>")
+    address = [sig[k] for k in ("street", "city") if sig.get(k)]
+    if address:
+        maps = "https://www.google.com/maps/search/?api=1&query=" + quote(", ".join(address))
+        rows += [f"<div><a href='{escape(maps)}' style='{SIG_LINK}'>{escape(line)}</a></div>" for line in address]
+    if not rows and not logo_src:
+        return ""
+    details = (f"<td style='padding:2px 0 2px 14px;border-left:2px solid #16191d;font-size:14px;line-height:1.7;"
+               f"color:#16191d;vertical-align:middle'>{''.join(rows)}</td>") if rows else ""
+    logo = (f"<td style='padding:0 16px 0 0;vertical-align:middle'><img src='{escape(logo_src)}' alt='"
+            f"{escape(sig.get('firm') or 'Logo')}' height=90 style='height:90px;width:auto;display:block;border:0'></td>"
+            ) if logo_src else ""
+    return ("<table role='presentation' cellpadding=0 cellspacing=0 border=0 style='margin:22px 0 0;"
+            f"font-family:Segoe UI,Arial,sans-serif'><tr>{logo}{details}</tr></table>")
 
 
 def _para_html(lines):
@@ -103,7 +146,7 @@ def _wrap(paragraphs, settings, button=None):
     sig = _signature(settings)
     if sig:
         text_parts.append("\n".join(sig))
-        html_parts.append("<p style='margin:18px 0 0;color:#555'>" + "<br>".join(escape(x) for x in sig) + "</p>")
+    html_parts.append(signature_html(settings, f"cid:{SIGNATURE_LOGO_CID}" if config.image_path("signature_logo") else None))
     text = "\n\n".join(text_parts) + "\n"
     html = ("<div style='font-family:Segoe UI,Arial,sans-serif;font-size:15px;line-height:1.5;color:#16191d;"
             "max-width:600px'>" + "".join(html_parts) + "</div>")

@@ -174,6 +174,47 @@ def test_api_accounts_totals_and_csv(env, tmp_path):
     assert not a.save_settings({"zelle": {"enabled": True, "recipient": ""}})["ok"]
 
 
+def test_every_email_carries_the_signature_with_inline_logo(env):
+    from PIL import Image
+    from desktop import images, mailer
+    s = config.load_settings()
+    s["signature"] = {"name": "Pat Lee, MSCE, PE", "firm": "", "phone": "555-123-4567", "email": "pat@acmecivil.test",
+                      "license": "C12345", "street": "1 Main St #2", "city": "Springfield CA 90000"}
+    config.save_settings(s)
+    logo = env["tmp"] / "logo.png"
+    Image.new("RGB", (800, 400), "navy").save(logo)
+    images.store("signature_logo", logo)
+    with Image.open(config.image_path("signature_logo")) as stored:
+        assert stored.height == images.SIGNATURE_LOGO_HEIGHT
+
+    tx_id = send(env)
+    sender.mark_paid(tx_id, "Zelle")
+    for msg in env["smtp"].sent:  # preview email and final-plans email
+        text = body(msg)
+        assert "Pat Lee, MSCE, PE\nCell: 555-123-4567\npat@acmecivil.test\nPE Lic#: C12345\n1 Main St #2\nSpringfield CA 90000" in text
+        assert "P.E." not in text
+        html = msg.get_body(("html",)).get_content()
+        assert f"cid:{mailer.SIGNATURE_LOGO_CID}" in html and "tel:5551234567" in html and "mailto:pat@acmecivil.test" in html
+        inline = [p for p in msg.walk() if p.get("Content-ID") == f"<{mailer.SIGNATURE_LOGO_CID}>"]
+        assert len(inline) == 1 and inline[0].get_content_type() == "image/png"
+        assert all(not n.endswith(".png") for n, _ in attachments(msg))  # the logo isn't a separate attachment
+
+    images.remove("signature_logo")
+    env["smtp"].sent.clear()
+    send(env)
+    msg = env["smtp"].sent[0]
+    assert "cid:" not in msg.get_body(("html",)).get_content()
+    assert not [p for p in msg.walk() if p.get_content_maintype() == "image"]
+
+
+def test_signature_preview_and_empty_signature(env):
+    from desktop.api import Api
+    from desktop import mailer
+    html = Api().signature_preview({"name": "Pat <Lee>", "street": "1 Main St"})
+    assert "Pat &lt;Lee&gt;" in html and "google.com/maps" in html
+    assert mailer.signature_html({"signature": {}}) == ""
+
+
 def test_page_cache_is_cleared_but_other_webview_data_kept(tmp_path):
     from desktop.app import clear_page_cache
     default = tmp_path / "EBWebView" / "Default"
