@@ -21,10 +21,9 @@ def check_all(notify=_noop, settings=None):
     with _check_lock:
         settings = settings or config.load_settings()
         summary = {"checked": 0, "paid": 0, "delivered": 0, "errors": []}
-        if not config.stripe_key():
-            summary["errors"].append("No Stripe key set")
-            return summary
         for tx in db.list_txs(["sent", "pending"]):
+            if not tx["link_id"]:  # Zelle/Venmo-only: nothing to ask Stripe; the engineer marks these paid
+                continue
             summary["checked"] += 1
             try:
                 _check_payment(tx, notify, settings, summary)
@@ -43,6 +42,8 @@ def check_all(notify=_noop, settings=None):
 
 
 def _check_payment(tx, notify, settings, summary):
+    if not config.stripe_key():
+        raise payments.PaymentsError("No Stripe key set")
     result = payments.poll(tx["link_id"])
     state = result["state"]
     if state == "open":
@@ -86,7 +87,7 @@ def _check_payment(tx, notify, settings, summary):
             notify("Check this payment", f"{tx['title']}: amount didn't match. Plans not sent.")
         return
     db.update_tx(tx["id"], status="paid", paid_at=db.now(), amount_paid_cents=result["amount"],
-                 payment_intent=result["payment_intent"], session_id=result["session_id"])
+                 payment_intent=result["payment_intent"], session_id=result["session_id"], paid_method="Stripe")
     db.log(tx["id"], f"Paid {mailer.money(result['amount'])} by Stripe")
     summary["paid"] += 1
     try:

@@ -39,7 +39,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     session_id TEXT NOT NULL DEFAULT '',
     delivery_error TEXT NOT NULL DEFAULT '',
     flags TEXT NOT NULL DEFAULT '{}',          -- small JSON bag: one-time log markers, last refund check
-    old_link_ids TEXT NOT NULL DEFAULT '[]'
+    old_link_ids TEXT NOT NULL DEFAULT '[]',
+    ref_code TEXT NOT NULL DEFAULT '',
+    methods TEXT NOT NULL DEFAULT '["stripe"]',  -- how the client may pay: stripe / zelle / venmo
+    paid_method TEXT NOT NULL DEFAULT ''          -- Stripe, Zelle, Venmo, Check, Cash, Other
 );
 CREATE TABLE IF NOT EXISTS activity (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,9 +71,21 @@ def connect():
             conn.close()
 
 
+# Columns added after the first release; older databases get them on startup.
+UPGRADE_COLUMNS = {
+    "ref_code": "TEXT NOT NULL DEFAULT ''",
+    "methods": "TEXT NOT NULL DEFAULT '[\"stripe\"]'",
+    "paid_method": "TEXT NOT NULL DEFAULT ''",
+}
+
+
 def init():
     with connect() as c:
         c.executescript(SCHEMA)
+        existing = {row["name"] for row in c.execute("PRAGMA table_info(transactions)")}
+        for name, ddl in UPGRADE_COLUMNS.items():
+            if name not in existing:
+                c.execute(f"ALTER TABLE transactions ADD COLUMN {name} {ddl}")
 
 
 def _row(r):
@@ -80,12 +95,13 @@ def _row(r):
     d["sheets"] = json.loads(d.get("sheets") or "[]")
     d["flags"] = json.loads(d.get("flags") or "{}")
     d["old_link_ids"] = json.loads(d.get("old_link_ids") or "[]")
+    d["methods"] = json.loads(d.get("methods") or '["stripe"]')
     return d
 
 
 def _encode(fields):
     out = dict(fields)
-    for key in ("sheets", "flags", "old_link_ids"):
+    for key in ("sheets", "flags", "old_link_ids", "methods"):
         if key in out and not isinstance(out[key], str):
             out[key] = json.dumps(out[key])
     return out

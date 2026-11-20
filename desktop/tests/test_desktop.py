@@ -62,7 +62,7 @@ def test_rejects_non_pdf(env):
 def test_requires_stripe_key(env):
     config.set_secret("stripe_secret_key", "")
     with pytest.raises(sender.SendError, match="Stripe key"):
-        send(env)
+        send(env, methods=["stripe"])
 
 
 def test_large_pdf_needs_share_link(env, monkeypatch):
@@ -230,9 +230,10 @@ def test_api_accounts_transactions_and_csv(env, tmp_path):
     env["fake"].pay("plink_1", 150000)
     assert a.check_now()["ok"]
     data = a.transactions()
-    assert data["totals"] == {"sent": 1, "paid": 1, "collected": "$1,500.00", "waiting": "$0.00"}
+    assert data["totals"] == {"sent": 1, "paid": 1, "collected": "$1,500.00", "waiting": "$0.00",
+                              "by_method": ["Stripe $1,500.00"]}
     item = data["items"][0]
-    assert item["label"] == "Paid · plans sent" and item["activity"][0]["text"].startswith("Final plans emailed")
+    assert item["label"] == "Paid via Stripe · plans sent" and item["activity"][0]["text"].startswith("Final plans emailed")
 
     out = tmp_path / "log.csv"
     write_csv(out)

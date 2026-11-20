@@ -24,25 +24,30 @@ def public_settings(settings=None):
     accounts = [{**a, "has_password": bool(config.smtp_password(a["email"]))} for a in settings["accounts"]]
     key = config.stripe_key()
     return {**settings, "accounts": accounts, "stripe_connected": bool(key),
-            "test_mode": payments.is_test_key(key) if key else False}
+            "test_mode": payments.is_test_key(key) if key else False,
+            "enabled_methods": config.enabled_methods(settings)}
 
 
 def transaction_view(tx):
+    via = f" via {tx['paid_method']}" if tx.get("paid_method") else ""
     if tx["status"] == "paid" and not tx["delivered_at"]:
-        label, tone = "Paid · plans NOT sent yet", "err"
+        label, tone = f"Paid{via} · plans NOT sent yet", "err"
     else:
         label, tone = {
             "sent": ("Not paid yet", ""),
             "pending": ("Bank transfer clearing", "warn"),
-            "paid": ("Paid · plans sent", "ok"),
+            "paid": (f"Paid{via} · plans sent", "ok"),
             "refunded": ("Refunded", "err"),
         }.get(tx["status"], (tx["status"], ""))
+    pay_by = [config.PAYMENT_METHODS[m].split(" (")[0] for m in tx.get("methods") or [] if m in config.PAYMENT_METHODS]
     return {
         "id": tx["id"], "title": tx["title"], "client_name": tx["client_name"], "client_email": tx["client_email"],
         "from_email": tx["from_email"], "price": mailer.money(tx["price_cents"]), "price_cents": tx["price_cents"],
         "status": tx["status"], "label": label, "tone": tone, "sent_at": tx["sent_at"], "paid_at": tx["paid_at"],
         "link_url": tx["link_url"], "pages": tx["pages"], "sha256": tx["sha256"], "share_link": tx["share_link"],
         "delivery_error": tx["delivery_error"], "delivered": bool(tx["delivered_at"]),
+        "ref_code": tx.get("ref_code") or "", "pay_by": pay_by, "paid_method": tx.get("paid_method") or "",
+        "amount_paid": mailer.money(tx["amount_paid_cents"]) if tx["amount_paid_cents"] else "",
         "activity": db.activity(tx["id"]),
     }
 
@@ -61,19 +66,25 @@ class Api:
         settings = public_settings()
         last = self._watcher.last_run.isoformat() if self._watcher and self._watcher.last_run else None
         return {"settings": settings, "presets": config.SMTP_PRESETS, "last_check": last,
+                "payment_methods": config.PAYMENT_METHODS, "manual_methods": config.MANUAL_METHODS,
                 "data_dir": str(config.data_dir()),
-                "setup_needed": not (settings["stripe_connected"] and settings["accounts"])}
+                "setup_needed": not (settings["enabled_methods"] and settings["accounts"])}
 
     def transactions(self):
         txs = db.list_txs()
         paid = [t for t in txs if t["status"] == "paid"]
         waiting = [t for t in txs if t["status"] in ("sent", "pending")]
+        by_method = {}
+        for t in paid:
+            m = t.get("paid_method") or "Stripe"
+            by_method[m] = by_method.get(m, 0) + (t["amount_paid_cents"] or t["price_cents"])
         return {
             "items": [transaction_view(t) for t in txs],
             "totals": {
                 "sent": len(txs), "paid": len(paid),
                 "collected": mailer.money(sum(t["amount_paid_cents"] or t["price_cents"] for t in paid)),
                 "waiting": mailer.money(sum(t["price_cents"] for t in waiting)),
+                "by_method": [f"{m} {mailer.money(c)}" for m, c in sorted(by_method.items(), key=lambda x: -x[1])],
             },
         }
 
@@ -102,7 +113,7 @@ class Api:
                 from_email=form.get("from_email", ""), to_email=form.get("to_email", ""),
                 price=form.get("price", ""), pdf_path=form.get("pdf_path", ""),
                 client_name=form.get("client_name", ""), title=form.get("title", ""),
-                share_link=form.get("share_link", ""),
+                share_link=form.get("share_link", ""), methods=form.get("methods"),
             )
         except sender.NeedShareLink as exc:
             return _err(exc, need_share_link=True)
@@ -114,6 +125,20 @@ class Api:
         tx = db.get_tx(tx_id)
         return _ok(message=f"Sent “{tx['title']}” to {tx['client_email']}. "
                            f"The final PDF is emailed to them automatically once they pay {mailer.money(tx['price_cents'])}.")
+
+    def mark_paid(self, tx_id, method, amount="", allow_short=False):
+        try:
+            delivered = sender.mark_paid(int(tx_id), method, amount, bool(allow_short))
+        except sender.SendError as exc:
+            return _err(exc, short=("less than" in str(exc)))
+        except Exception as exc:
+            log.exception("Mark paid failed")
+            return _err(f"Unexpected error: {exc}")
+        tx = db.get_tx(int(tx_id))
+        if delivered:
+            return _ok(message=f"Marked paid via {method}. The final plans were emailed to {tx['client_email']}.")
+        return _err(f"Marked paid, but the plans couldn't be emailed: {tx['delivery_error']}. "
+                    "The app will keep retrying; you can also use Resend.")
 
     def resend(self, tx_id):
         try:
@@ -176,7 +201,16 @@ class Api:
         for field in ("signature",):
             if field in payload:
                 settings[field] = {k: str(v).strip() for k, v in payload[field].items()}
-        for field in ("allow_ach", "start_with_windows"):
+        for field in ("zelle", "venmo"):
+            if field in payload:
+                clean = {k: (v.strip() if isinstance(v, str) else bool(v)) for k, v in payload[field].items()}
+                if field == "venmo":
+                    clean["username"] = clean.get("username", "").lstrip("@")
+                if clean.get("enabled") and not (clean.get("recipient") or clean.get("username")):
+                    return _err(f"Enter your {field.title()} {'email or phone' if field == 'zelle' else 'username'}, "
+                                f"or switch {field.title()} off.")
+                settings[field] = {**settings[field], **clean}
+        for field in ("allow_ach", "start_with_windows", "stripe_enabled"):
             if field in payload:
                 settings[field] = bool(payload[field])
         if "poll_minutes" in payload:

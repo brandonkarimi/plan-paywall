@@ -69,6 +69,9 @@ A Windows app for one engineer: pick a PDF, enter the client's email and price, 
 - **Run from source:** `.venv\Scripts\pythonw run_desktop.py` (add `--tray` to start hidden).
 - **Build the .exe:** `powershell -ExecutionPolicy Bypass -File desktop\build.ps1`. This produces `dist\PlanSender\PlanSender.exe` and `dist\PlanSender.zip`, which you give to the engineer to unzip and double-click.
 - **First run:** use Settings to add (1) the Stripe secret key, (2) an email account (for Gmail, an app password from myaccount.google.com/apppasswords), and (3) the signature details. Turn on "Start with Windows" so payments are processed whenever the PC is on.
+- **Payment methods** (Settings → How clients can pay): any mix of
+  - **Stripe** (card or bank): detected automatically, and the plans go out within minutes.
+  - **Zelle** (no fees) and **Venmo**: the email gives the client exact instructions and a reference code (`PLN-<id>`), plus a pre-filled Venmo link. These apps have no API, so when the money arrives you click **Transactions → Mark as paid** and the final PDF is emailed immediately. Only mark a payment paid once you see it in your bank or Venmo app. Venmo requires a business profile for payments for work.
 - **Data:** stored in `%APPDATA%\PlanSender` (database, copies of sent PDFs, log). Secrets are in Windows Credential Manager.
 - **Delivery timing:** the app checks Stripe every 2 minutes while it's running (it sits in the tray when the window is closed). If the PC is off when a client pays, the plans go out when it next starts. Clients are told "usually within minutes, at most 1 business day".
 - **Tests:** `.venv\Scripts\python -m pytest desktop\tests`

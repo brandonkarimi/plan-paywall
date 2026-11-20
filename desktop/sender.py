@@ -47,18 +47,30 @@ def make_preview(final_path: Path, out_path: Path, text: str, settings) -> Path:
     return out_path
 
 
-def check_ready(from_email, settings):
-    if not config.stripe_key():
-        raise SendError("Add your Stripe key in Settings first.")
+def check_ready(from_email, settings, methods=("stripe",)):
+    if "stripe" in methods and not config.stripe_key():
+        raise SendError("Add your Stripe key in Settings first, or untick card payments.")
+    if "zelle" in methods and not settings["zelle"].get("recipient"):
+        raise SendError("Add your Zelle email or phone in Settings → Payment methods.")
+    if "venmo" in methods and not settings["venmo"].get("username"):
+        raise SendError("Add your Venmo username in Settings → Payment methods.")
     if not config.account_for(from_email, settings):
         raise SendError(f"{from_email or 'The From address'} isn't set up. Add it in Settings → Email accounts.")
     if not config.smtp_password(from_email):
         raise SendError(f"No password saved for {from_email}. Add it in Settings → Email accounts.")
 
 
-def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="", share_link="", settings=None):
-    """Returns the new transaction id. Raises SendError (NeedShareLink for very large PDFs)."""
+def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="", share_link="", methods=None,
+               settings=None):
+    """Returns the new transaction id. Raises SendError (NeedShareLink for very large PDFs).
+
+    methods: any of "stripe", "zelle", "venmo" (default: every method enabled in Settings).
+    """
     settings = settings or config.load_settings()
+    methods = [m for m in (methods if methods is not None else config.enabled_methods(settings))
+               if m in config.PAYMENT_METHODS]
+    if not methods:
+        raise SendError("Choose at least one way for the client to pay (set them up in Settings → Payment methods).")
     from_email, to_email = from_email.strip(), to_email.strip()
     client_name, title, share_link = client_name.strip(), title.strip(), share_link.strip()
     if not EMAIL_RE.match(to_email):
@@ -79,14 +91,16 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
             f"This PDF is {info['size_bytes'] / 1e6:.0f} MB, too big to email as an attachment. Upload it to "
             "OneDrive, Dropbox or Google Drive, create a share link, and paste it below. The link is only "
             "emailed to the client after they pay. Don't share it anywhere else.")
-    check_ready(from_email, settings)
+    check_ready(from_email, settings, methods)
 
     title = title or src.stem.replace("_", " ").strip()
     tx_id = db.create_tx(
         title=title, client_name=client_name, client_email=to_email, from_email=from_email,
         price_cents=price_cents, status="draft", original_name=src.name, share_link=share_link,
         sha256=info["sha256"], pages=info["page_count"], size_bytes=info["size_bytes"], sheets=info["sheet_index"],
+        methods=methods,
     )
+    db.update_tx(tx_id, ref_code=f"PLN-{tx_id}")
     folder = config.files_dir(tx_id)
     link_id = ""
     try:
@@ -95,8 +109,9 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
         preview = make_preview(final, folder / "preview.pdf", watermark_text(client_name, to_email), settings)
         db.update_tx(tx_id, final_path=str(final), preview_path=str(preview))
 
-        link_id, link_url = payments.create_payment_link(db.get_tx(tx_id), allow_ach=settings.get("allow_ach", True))
-        db.update_tx(tx_id, link_id=link_id, link_url=link_url)
+        if "stripe" in methods:
+            link_id, link_url = payments.create_payment_link(db.get_tx(tx_id), allow_ach=settings.get("allow_ach", True))
+            db.update_tx(tx_id, link_id=link_id, link_url=link_url)
 
         tx = db.get_tx(tx_id)
         subject, text, html = mailer.invite(tx, settings)
@@ -115,9 +130,39 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
         raise SendError(str(exc)) from exc
 
     db.update_tx(tx_id, status="sent", sent_at=db.now())
+    pay_by = ", ".join(config.PAYMENT_METHODS[m].split(" (")[0] for m in methods)
     db.log(tx_id, f"Sent to {to_email} from {from_email} ({mailer.money(price_cents)}, "
-                  f"{info['page_count']} page{'s' if info['page_count'] != 1 else ''})")
+                  f"{info['page_count']} page{'s' if info['page_count'] != 1 else ''}). Pay by: {pay_by}. Ref PLN-{tx_id}")
     return tx_id
+
+
+def mark_paid(tx_id, method, amount=None, allow_short=False, settings=None):
+    """The engineer confirms a payment the app can't see (Zelle, Venmo, check, cash) and the plans go out.
+
+    Returns True if the final plans were emailed (False = paid but delivery failed; it retries automatically).
+    """
+    from desktop import watcher
+
+    settings = settings or config.load_settings()
+    tx = db.get_tx(int(tx_id))
+    if tx is None:
+        raise SendError("Transaction not found.")
+    if tx["status"] in ("paid", "refunded"):
+        raise SendError("This one is already marked paid.")
+    if method not in config.MANUAL_METHODS:
+        raise SendError("Choose how the client paid.")
+    cents = tx["price_cents"] if amount in (None, "") else _price_cents(amount)
+    if cents < tx["price_cents"] and not allow_short:
+        raise SendError(f"That's less than the {mailer.money(tx['price_cents'])} price. Tick “release anyway” to "
+                        "send the plans for a partial payment.")
+    db.update_tx(tx["id"], status="paid", paid_at=db.now(), amount_paid_cents=cents, paid_method=method)
+    db.log(tx["id"], f"Paid {mailer.money(cents)} via {method} (confirmed by you)")
+    if tx["link_id"]:  # stop the client also paying by card
+        try:
+            payments.deactivate(tx["link_id"])
+        except Exception:
+            db.log(tx["id"], "Couldn't switch off the Stripe pay link; switch it off in Stripe if needed")
+    return watcher.deliver(db.get_tx(tx["id"]), settings=settings)
 
 
 def resend(tx_id, settings=None):

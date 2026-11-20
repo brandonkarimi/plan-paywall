@@ -5,6 +5,7 @@ from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 from html import escape
 from pathlib import Path
+from urllib.parse import quote
 
 from desktop import config
 
@@ -82,12 +83,14 @@ def _wrap(paragraphs, settings, button=None):
         lines = p if isinstance(p, list) else [p]
         text_parts.append("\n".join(lines))
         html_parts.append("<p style='margin:0 0 14px'>" + "<br>".join(escape(x) for x in lines) + "</p>")
-        if button and p is button["after"]:
-            text_parts.append(f"{button['label']}: {button['url']}")
-            html_parts.append(
-                f"<p style='margin:4px 0 20px'><a href='{escape(button['url'])}' style='background:#1d4ed8;color:#fff;"
-                f"padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block'>"
-                f"{escape(button['label'])}</a></p>")
+        buttons = button if isinstance(button, list) else [button] if button else []
+        for b in buttons:
+            if p is b["after"]:
+                text_parts.append(f"{b['label']}: {b['url']}")
+                html_parts.append(
+                    f"<p style='margin:4px 0 20px'><a href='{escape(b['url'])}' style='background:{b.get('color', '#1d4ed8')};"
+                    f"color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;"
+                    f"display:inline-block'>{escape(b['label'])}</a></p>")
     sig = _signature(settings)
     if sig:
         text_parts.append("\n".join(sig))
@@ -113,19 +116,48 @@ def _manifest(tx):
     return lines
 
 
+def venmo_link(username, cents, note):
+    user = username.strip().lstrip("@")
+    return (f"https://venmo.com/{quote(user)}?txn=pay&amount={cents / 100:.2f}"
+            f"&note={quote(note)}")
+
+
 def invite(tx, settings):
+    price = money(tx["price_cents"])
+    ref = tx.get("ref_code") or f"PLN-{tx['id']}"
+    methods = tx.get("methods") or ["stripe"]
     intro = (f"Your plans for {tx['title']} are ready. A watermarked preview of every sheet is attached for "
-             f"review. The final PDF is sent to you automatically once payment of {money(tx['price_cents'])} is made:")
-    paragraphs = [_greeting(tx), intro]
-    button = {"after": intro, "label": f"Pay {money(tx['price_cents'])} & receive the final plans", "url": tx["link_url"]}
+             f"review. The final PDF is emailed to you once payment of {price} is received.")
+    paragraphs, buttons = [_greeting(tx), intro], []
+    many = len(methods) > 1
+    if "stripe" in methods and tx.get("link_url"):
+        p = (("Option: " if many else "") + "Pay online by card or bank transfer (secure checkout by Stripe). "
+             "The final PDF is emailed automatically within minutes.")
+        paragraphs.append(p)
+        buttons.append({"after": p, "label": f"Pay {price} online", "url": tx["link_url"]})
+    if "zelle" in methods:
+        z = settings.get("zelle") or {}
+        who = z.get("recipient", "")
+        name = f" ({z['name']})" if z.get("name") else ""
+        paragraphs.append([("Option: " if many else "") + "Pay with Zelle (no fees):",
+                           f"  Send {price} to {who}{name}",
+                           f"  Memo: {ref}"])
+    if "venmo" in methods:
+        v = settings.get("venmo") or {}
+        user = v.get("username", "").strip().lstrip("@")
+        p = [("Option: " if many else "") + f"Pay with Venmo: send {price} to @{user} with the note {ref}."]
+        paragraphs.append(p)
+        buttons.append({"after": p, "label": f"Pay {price} with Venmo", "color": "#008cff",
+                        "url": venmo_link(user, tx["price_cents"], f"{ref} {tx['title']}")})
+    if any(m in methods for m in ("zelle", "venmo")):
+        paragraphs.append(f"Please include {ref} with Zelle or Venmo payments so we can match them. Once your "
+                          "payment is confirmed (usually the same day), the final PDF is emailed to this address.")
     paragraphs += [
-        "Payment is handled securely by Stripe (card or bank transfer). After paying, the final PDF is emailed "
-        "to this address, usually within minutes and at most 1 business day.",
         _manifest(tx),
         "The fingerprint above identifies the exact final file you'll receive; you can check it after downloading "
         "(Windows: certutil -hashfile file.pdf SHA256, Mac: shasum -a 256 file.pdf).",
     ]
-    text, html = _wrap(paragraphs, settings, button)
+    text, html = _wrap(paragraphs, settings, buttons)
     return f"Plans ready for review: {tx['title']}", text, html
 
 

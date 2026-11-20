@@ -31,6 +31,9 @@ DEFAULT_SETTINGS = {
     "default_from": "",
     "signature": {"name": "", "firm": "", "license": "", "phone": ""},
     "allow_ach": True,
+    "stripe_enabled": True,
+    "zelle": {"enabled": False, "recipient": "", "name": ""},   # email or phone clients send to + name shown in Zelle
+    "venmo": {"enabled": False, "username": ""},
     "start_with_windows": False,
     "poll_seconds": 120,
     "preview_dpi": 100,
@@ -66,7 +69,9 @@ def load_settings() -> dict:
     if path.exists():
         try:
             saved = json.loads(path.read_text(encoding="utf-8"))
-            settings.update({k: v for k, v in saved.items() if k in DEFAULT_SETTINGS})
+            for k, v in saved.items():
+                if k in DEFAULT_SETTINGS:
+                    settings[k] = {**DEFAULT_SETTINGS[k], **v} if isinstance(DEFAULT_SETTINGS[k], dict) else v
         except (OSError, ValueError):
             pass
     return settings
@@ -76,6 +81,23 @@ def save_settings(settings: dict):
     clean = {k: settings.get(k, v) for k, v in DEFAULT_SETTINGS.items()}
     (data_dir() / "settings.json").write_text(json.dumps(clean, indent=2), encoding="utf-8")
     set_start_with_windows(bool(clean["start_with_windows"]))
+
+
+PAYMENT_METHODS = {"stripe": "Card / bank (Stripe)", "zelle": "Zelle", "venmo": "Venmo"}
+MANUAL_METHODS = ["Zelle", "Venmo", "Check", "Cash", "Other"]
+
+
+def enabled_methods(settings=None) -> list:
+    """Payment methods ready to offer clients, in display order."""
+    settings = settings or load_settings()
+    methods = []
+    if settings.get("stripe_enabled", True) and stripe_key():
+        methods.append("stripe")
+    if settings["zelle"].get("enabled") and settings["zelle"].get("recipient"):
+        methods.append("zelle")
+    if settings["venmo"].get("enabled") and settings["venmo"].get("username"):
+        methods.append("venmo")
+    return methods
 
 
 def account_for(email: str, settings=None):
