@@ -46,7 +46,7 @@ def test_send_emails_preview_and_instructions_but_never_the_final(env):
         assert detail not in text
     (name, data), = attachments(msg)
     assert name.startswith("PREVIEW") and data != original
-    assert log_texts(tx_id)[0].startswith("Sent to client@example.com from pat@acmecivil.test ($1,500.00, 3 pages)")
+    assert log_texts(tx_id) == ["Preview sent to client@example.com"]
 
 
 def test_send_with_one_method(env):
@@ -106,8 +106,7 @@ def test_mark_paid_delivers_final_once(env):
     with pytest.raises(sender.SendError, match="already marked paid"):
         sender.mark_paid(tx_id, "Zelle")
     assert len(env["smtp"].sent) == 1
-    assert "Paid $1,500.00 via Zelle (confirmed by you)" in log_texts(tx_id)
-    assert "Final plans emailed to client@example.com" in log_texts(tx_id)
+    assert log_texts(tx_id)[1:] == ["Marked as paid: $1,500.00 by Zelle", "Full plans emailed to client@example.com"]
 
 
 def test_partial_payment_needs_explicit_release(env):
@@ -137,7 +136,8 @@ def test_resend(env):
     sender.mark_paid(tx_id, "Cash")
     sender.resend(tx_id)
     assert env["smtp"].sent[-1]["Subject"] == "Plans: Lot 7 Grading"
-    assert "Final plans re-sent to client@example.com" in log_texts(tx_id)
+    assert "Full plans emailed again to client@example.com" in log_texts(tx_id)
+    assert "Preview emailed again to client@example.com" in log_texts(tx_id)
 
 
 # ------------------------------------------------------------------ window bridge & storage
@@ -159,12 +159,15 @@ def test_api_accounts_totals_and_csv(env, tmp_path):
     assert data["totals"]["waiting"] == "$200.00"
     assert sorted(data["totals"]["by_method"]) == ["Venmo $1,500.00", "Zelle $1,500.00"]
     labels = {i["id"]: i["label"] for i in data["items"]}
-    assert labels[t1] == "Paid via Zelle · plans sent"
+    assert labels[t1] == "Paid by Zelle"
+    item = next(i for i in data["items"] if i["id"] == t1)
+    assert item["pay_by_text"] == "Zelle or Venmo" and item["plans_text"] == "3 pages"
 
     out = tmp_path / "log.csv"
     write_csv(out)
     content = out.read_text(encoding="utf-8-sig")
-    assert content.startswith("Date,Time,Ref,Project") and "Paid $1,500.00 via Zelle" in content
+    assert content.startswith("Date,Time,Project,Client name,Client email,Amount,Status,What happened")
+    assert "Marked as paid: $1,500.00 by Zelle" in content and "PLN" not in content
 
     assert a.save_settings({"venmo": {"enabled": True, "username": "@new-handle"}})["ok"]
     assert config.load_settings()["venmo"]["username"] == "new-handle"
@@ -223,3 +226,13 @@ def test_reset_log_requires_confirmation_and_never_reuses_refs(env):
 def test_greeting_without_client_name(env):
     send(env, client_name="")
     assert body(env["smtp"].sent[0]).startswith("Hello,\n")
+
+
+def test_old_log_entries_are_shown_in_plain_wording():
+    from desktop.api import friendly
+
+    assert friendly("Sent to a@b.com from x@y.com ($10.00, 2 pages). Pay by: Venmo. Ref PLN-1") == "Preview sent to a@b.com"
+    assert friendly("Sent to a@b.com from x@y.com (amount on invoice, 3 pages, invoice attached). Pay by: Zelle. Ref PLN-4")         == "Preview and invoice sent to a@b.com"
+    assert friendly("Paid $1,500.00 via Zelle (confirmed by you)") == "Marked as paid: $1,500.00 by Zelle"
+    assert friendly("Final plans re-sent to a@b.com") == "Full plans emailed again to a@b.com"
+    assert friendly("Something new") == "Something new"

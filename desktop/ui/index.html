@@ -130,6 +130,11 @@
   .pill.ok { background: var(--money-soft); color: var(--money); }
   .pill.err { background: var(--err-soft); color: var(--err); }
   .body { padding: 4px 6px 16px 22px; }
+  .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; margin: 2px 0 14px; font-size: .9rem; }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; overflow-wrap: anywhere; }
+  .history-title { font-size: .78rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 6px; }
   ol.timeline { list-style: none; margin: 0 0 12px; padding: 0 0 0 14px; border-left: 2px solid var(--line); }
   ol.timeline li { position: relative; padding: 3px 0 3px 10px; font-size: .9rem; }
   ol.timeline li::before { content: ""; position: absolute; left: -20px; top: 10px; width: 10px; height: 10px; border-radius: 3px; background: var(--brand); }
@@ -365,6 +370,11 @@ function ask({ title, message, ok = "OK", tone = "brand", icon = "?" }) {
     okBtn.focus();
   });
 }
+function fmtDay(ts) {
+  if (!ts) return "";
+  const d = new Date(ts), now = new Date();
+  return d.toLocaleDateString([], { month: "short", day: "numeric", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
+}
 function fmt(ts) {
   if (!ts) return "";
   return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -535,7 +545,7 @@ $("send-btn").addEventListener("click", async () => {
 let txItems = [];
 function matches(t, words) {
   if (!words.length) return true;
-  const hay = [t.title, t.client_name, t.client_email, t.from_email, t.ref_code, t.price, t.label,
+  const hay = [t.title, t.client_name, t.client_email, t.from_email, t.price, t.label,
     t.pay_by.join(" "), ...t.activity.map(a => a.text)].join(" ").toLowerCase();
   return words.every(w => hay.includes(w));
 }
@@ -543,7 +553,7 @@ async function loadTransactions() {
   const data = await api.transactions();
   $("t-sent").textContent = data.totals.sent; $("t-paid").textContent = data.totals.paid;
   $("t-collected").textContent = data.totals.collected; $("t-waiting").textContent = data.totals.waiting;
-  $("t-methods").textContent = data.totals.by_method.length ? "By method: " + data.totals.by_method.join(" · ") : "";
+  $("t-methods").textContent = data.totals.by_method.length ? "Received: " + data.totals.by_method.join(" · ") : "";
   txItems = data.items;
   $("reset-btn").classList.toggle("hidden", !txItems.length);
   renderTransactions();
@@ -584,23 +594,29 @@ function renderTransactions() {
     }
     actions.append(el("button", { class: "btn ghost", onclick: async (e) => {
       if (!await ask(paid
-        ? { title: "Resend final plans?", message: `The final plans will be emailed to ${t.client_email} again.`, ok: "Resend", icon: "↻" }
-        : { title: "Resend payment instructions?", message: `The preview${t.has_invoice ? ", invoice" : ""} and payment instructions will be emailed to ${t.client_email} again.`, ok: "Resend", icon: "↻" })) return;
+        ? { title: "Resend full plans?", message: `The full plans will be emailed to ${t.client_email} again.`, ok: "Resend", icon: "↻" }
+        : { title: "Resend preview?", message: `The preview${t.has_invoice ? ", invoice" : ""} and payment details will be emailed to ${t.client_email} again.`, ok: "Resend", icon: "↻" })) return;
       e.target.disabled = true; const r = await api.resend(t.id); e.target.disabled = false;
-      flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err"); loadTransactions(); } }, paid ? "Resend final plans" : "Resend payment instructions"));
+      flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err"); loadTransactions(); } }, paid ? "Resend full plans" : "Resend preview"));
     actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "preview") }, "Open preview"));
-    actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "final") }, "Open final PDF"));
+    actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "final") }, "Open full plans"));
     if (t.has_invoice) actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "invoice") }, "Open invoice"));
     const d = el("details", { class: "tx", "data-id": t.id },
       el("summary", {},
         el("div", {}, el("div", { class: "title" }, t.title),
-          el("div", { class: "sub" }, `${t.ref_code ? t.ref_code + " · " : ""}to ${t.client_email}${t.client_name ? " (" + t.client_name + ")" : ""} · ${fmt(t.sent_at)}`)),
+          el("div", { class: "sub" }, `${t.client_name ? t.client_name + " · " : ""}${t.client_email} · sent ${fmtDay(t.sent_at)}`)),
         el("div", { class: "price" }, t.price),
         el("span", { class: `pill ${t.tone}` }, t.label)),
       el("div", { class: "body" },
-        t.delivery_error ? el("div", { class: "notice err small" }, `Plans not sent: ${t.delivery_error}. Fix the problem, then use “Resend final plans”.`) : null,
-        el("ol", { class: "timeline" }, t.activity.map(a => el("li", { class: a.text.startsWith("Paid") ? "paid" : "" }, el("time", {}, fmt(a.ts)), a.text))),
-        el("div", { class: "sub", style: "margin-bottom:10px" }, `Ref ${t.ref_code || "-"} · pay by ${t.pay_by.join(", ") || "-"} · from ${t.from_email} · ${t.pages} pages · fingerprint ${t.sha256.slice(0, 12)}…${t.share_link ? " · delivered by link" : ""}`),
+        t.delivery_error ? el("div", { class: "notice err small" }, `The full plans couldn't be emailed (${t.delivery_error}). Fix the problem, then click “Resend full plans”.`) : null,
+        el("dl", { class: "facts" },
+          el("dt", {}, "Client"), el("dd", {}, t.client_name ? `${t.client_name} (${t.client_email})` : t.client_email),
+          el("dt", {}, "Amount"), el("dd", {}, t.price === "On invoice" ? "Shown on the invoice" : t.price),
+          el("dt", {}, "Can pay by"), el("dd", {}, t.pay_by_text || "-"),
+          el("dt", {}, "Sent from"), el("dd", {}, t.from_email),
+          el("dt", {}, "Plans"), el("dd", {}, t.plans_text + (t.has_invoice ? ", with invoice" : ""))),
+        el("div", { class: "history-title" }, "History"),
+        el("ol", { class: "timeline" }, t.activity.map(a => el("li", { class: a.text.startsWith("Marked as paid") ? "paid" : "" }, el("time", {}, fmt(a.ts)), a.text))),
         markForm, actions));
     if (open.has(String(t.id)) || (words.length && shown.length <= 3)) d.open = true;
     list.append(d);

@@ -2,6 +2,7 @@
 import csv
 import logging
 import os
+import re
 import shutil
 import webbrowser
 from datetime import datetime
@@ -26,12 +27,42 @@ def public_settings(settings=None):
     return {**settings, "accounts": accounts, "enabled_methods": config.enabled_methods(settings)}
 
 
+# Older versions wrote more technical log lines; show them in today's plain wording.
+_OLD_WORDING = [
+    (re.compile(r"^Sent to (\S+) from \S+ \((?:[^)]*?)(, invoice attached)?\)\..*$"),
+     lambda m: f"Preview{' and invoice' if m.group(2) else ''} sent to {m.group(1)}"),
+    (re.compile(r"^Paid (\$[\d,.]+) via (\w+) \(confirmed by you\)$"), lambda m: f"Marked as paid: {m.group(1)} by {m.group(2)}"),
+    (re.compile(r"^Paid via (\w+) \(confirmed by you\)$"), lambda m: f"Marked as paid by {m.group(1)}"),
+    (re.compile(r"^Final plans emailed to (.+)$"), lambda m: f"Full plans emailed to {m.group(1)}"),
+    (re.compile(r"^Final plans re-sent to (.+)$"), lambda m: f"Full plans emailed again to {m.group(1)}"),
+    (re.compile(r"^Payment instructions re-sent to client$"), lambda m: "Preview emailed again"),
+    (re.compile(r"^Could not email the final plans: (.+)$"), lambda m: f"Couldn't email the full plans: {m.group(1)}"),
+]
+
+
+def friendly(text):
+    for pattern, fix in _OLD_WORDING:
+        m = pattern.match(text)
+        if m:
+            return fix(m)
+    return text
+
+
+def _or_list(items):
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " or " + items[-1] if items else ""
+
+
 def transaction_view(tx):
-    via = f" via {tx['paid_method']}" if tx.get("paid_method") else ""
+    method = tx.get("paid_method") or ""
     if tx["status"] == "paid":
-        label, tone = (f"Paid{via} · plans sent", "ok") if tx["delivered_at"] else (f"Paid{via} · plans NOT sent", "err")
+        if tx["delivered_at"]:
+            label, tone = (f"Paid by {method}" if method else "Paid"), "ok"
+        else:
+            label, tone = "Paid, plans not sent yet", "err"
     else:
-        label, tone = "Not paid yet", ""
+        label, tone = "Waiting for payment", ""
+    pay_by = [config.PAYMENT_METHODS[m] for m in tx.get("methods") or [] if m in config.PAYMENT_METHODS]
+    pages = tx["pages"] or 0
     return {
         "id": tx["id"], "title": tx["title"], "client_name": tx["client_name"], "client_email": tx["client_email"],
         "from_email": tx["from_email"], "status": tx["status"],
@@ -40,9 +71,10 @@ def transaction_view(tx):
         "has_invoice": bool(tx.get("invoice_path")),
         "label": label, "tone": tone, "sent_at": tx["sent_at"], "paid_at": tx["paid_at"], "pages": tx["pages"],
         "sha256": tx["sha256"], "share_link": tx["share_link"], "delivery_error": tx["delivery_error"],
-        "ref_code": tx.get("ref_code") or "", "paid_method": tx.get("paid_method") or "",
-        "pay_by": [config.PAYMENT_METHODS[m] for m in tx.get("methods") or [] if m in config.PAYMENT_METHODS],
-        "activity": db.activity(tx["id"]),
+        "ref_code": tx.get("ref_code") or "", "paid_method": method,
+        "pay_by": pay_by, "pay_by_text": _or_list(pay_by),
+        "plans_text": f"{pages} page{'s' if pages != 1 else ''}" + (" (sent by download link)" if tx["share_link"] else ""),
+        "activity": [{**a, "text": friendly(a["text"])} for a in db.activity(tx["id"])],
     }
 
 
@@ -73,7 +105,7 @@ class Api:
                 "sent": len(txs), "paid": len(paid),
                 "collected": mailer.money(sum(t["amount_paid_cents"] or t["price_cents"] for t in paid)),
                 "waiting": mailer.money(sum(t["price_cents"] for t in txs if t["status"] == "sent")),
-                "by_method": [f"{m} {mailer.money(c)}" for m, c in sorted(by_method.items(), key=lambda x: -x[1])],
+                "by_method": [f"{m} {mailer.money(c)}" for m, c in sorted(by_method.items(), key=lambda x: -x[1]) if c],
             },
         }
 
@@ -255,11 +287,10 @@ class Api:
 def write_csv(path):
     with open(path, "w", newline="", encoding="utf-8-sig") as f:  # BOM so Excel reads accents correctly
         w = csv.writer(f)
-        w.writerow(["Date", "Time", "Ref", "Project", "Client email", "Client name", "Sent from", "Price",
-                    "Current status", "Update"])
+        w.writerow(["Date", "Time", "Project", "Client name", "Client email", "Amount", "Status", "What happened"])
         for tx in db.list_txs():
             view = transaction_view(tx)
             for entry in reversed(view["activity"]):
                 ts = datetime.fromisoformat(entry["ts"]).astimezone()
-                w.writerow([f"{ts:%Y-%m-%d}", f"{ts:%H:%M}", view["ref_code"], tx["title"], tx["client_email"],
-                            tx["client_name"], tx["from_email"], view["price"], view["label"], entry["text"]])
+                w.writerow([f"{ts:%Y-%m-%d}", f"{ts:%I:%M %p}", tx["title"], tx["client_name"], tx["client_email"],
+                            view["price"], view["label"], entry["text"]])

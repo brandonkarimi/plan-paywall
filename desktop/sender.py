@@ -137,12 +137,7 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
         raise SendError(str(exc)) from exc
 
     db.update_tx(tx_id, status="sent", sent_at=db.now())
-    pay_by = ", ".join(config.PAYMENT_METHODS[m] for m in methods)
-    amount = mailer.money(price_cents) if price_cents else "amount on invoice"
-    pages = f"{info['page_count']} page{'s' if info['page_count'] != 1 else ''}"
-    with_invoice = ", invoice attached" if invoice is not None else ""
-    db.log(tx_id, f"Sent to {to_email} from {from_email} ({amount}, {pages}{with_invoice}). Pay by: {pay_by}. "
-                  f"Ref PLN-{tx_id}")
+    db.log(tx_id, f"Preview{' and invoice' if invoice is not None else ''} sent to {to_email}")
     return tx_id
 
 
@@ -176,7 +171,7 @@ def mark_paid(tx_id, method, amount=None, allow_short=False, settings=None):
         raise SendError(f"That's less than the {mailer.money(tx['price_cents'])} price. Tick “release anyway” to "
                         "send the plans for a partial payment.")
     db.update_tx(tx["id"], status="paid", paid_at=db.now(), amount_paid_cents=cents, paid_method=method)
-    db.log(tx["id"], f"Paid {mailer.money(cents) + ' ' if cents else ''}via {method} (confirmed by you)")
+    db.log(tx["id"], f"Marked as paid: {mailer.money(cents)} by {method}" if cents else f"Marked as paid by {method}")
     return deliver(db.get_tx(tx["id"]), settings)
 
 
@@ -193,11 +188,11 @@ def deliver(tx, settings=None):
         mailer.send(tx["from_email"], tx["client_email"], subject, text, html, attachments, settings=settings)
     except Exception as exc:
         db.update_tx(tx["id"], delivery_error=str(exc))
-        db.log(tx["id"], f"Could not email the final plans: {exc}")
+        db.log(tx["id"], f"Couldn't email the full plans: {exc}")
         return False
     first = not tx["delivered_at"]
     db.update_tx(tx["id"], delivered_at=tx["delivered_at"] or db.now(), delivery_error="")
-    db.log(tx["id"], ("Final plans emailed to " if first else "Final plans re-sent to ") + tx["client_email"])
+    db.log(tx["id"], ("Full plans emailed to " if first else "Full plans emailed again to ") + tx["client_email"])
     return True
 
 
@@ -214,4 +209,4 @@ def resend(tx_id, settings=None):
     subject, text, html = mailer.invite(tx, settings)
     mailer.send(tx["from_email"], tx["client_email"], subject, text, html,
                 attachments=invite_attachments(tx), settings=settings)
-    db.log(tx_id, "Payment instructions re-sent to client")
+    db.log(tx_id, f"Preview emailed again to {tx['client_email']}")

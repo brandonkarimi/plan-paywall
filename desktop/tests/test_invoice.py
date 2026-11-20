@@ -54,7 +54,7 @@ def test_invoice_without_price(env, invoice):
     assert "along with your invoice. To receive the full PDF, please pay the invoice." in text
     assert "Zelle: send the invoice amount to pat@acmecivil.test" in text
     assert "Venmo: send the invoice amount to @AcmeCivil-Eng" in text
-    assert "amount on invoice" in log_texts(tx_id)[0] and "invoice attached" in log_texts(tx_id)[0]
+    assert log_texts(tx_id) == ["Preview and invoice sent to client@example.com"]
 
 
 def test_invoice_with_price(env, invoice):
@@ -79,7 +79,7 @@ def test_bad_invoice_rejected(env):
 def test_mark_paid_with_amount_on_invoice(env, invoice):
     t1 = send(env, price="", invoice_path=str(invoice))
     assert sender.mark_paid(t1, "Zelle")  # no amount typed: fine, amount unknown
-    assert db.get_tx(t1)["amount_paid_cents"] is None and "Paid via Zelle (confirmed by you)" in log_texts(t1)
+    assert db.get_tx(t1)["amount_paid_cents"] is None and "Marked as paid by Zelle" in log_texts(t1)
     t2 = send(env, price="", invoice_path=str(invoice), to_email="b@example.com")
     assert sender.mark_paid(t2, "Venmo", "1500")
     assert db.get_tx(t2)["amount_paid_cents"] == 150000
