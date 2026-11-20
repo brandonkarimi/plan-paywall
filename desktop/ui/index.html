@@ -145,6 +145,19 @@
   .acct { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
   .acct:first-of-type { border-top: 0; }
   .footer-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); display: grid; place-items: center;
+    z-index: 50; padding: 16px; animation: fade .12s ease-out; }
+  .modal { background: var(--card); border-radius: 16px; width: min(440px, 100%); padding: 22px;
+    box-shadow: 0 20px 50px rgba(15, 23, 42, .3); animation: pop .14s ease-out; }
+  .modal h3 { margin: 0 0 8px; font-size: 1.1rem; display: flex; align-items: center; gap: 10px; }
+  .modal h3 .dot { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: #fff;
+    font-size: .95rem; flex: none; background: var(--brand); }
+  .modal.tone-money h3 .dot { background: var(--money-deep); }
+  .modal.tone-danger h3 .dot { background: var(--err); }
+  .modal p { margin: 0 0 18px; color: var(--muted); overflow-wrap: anywhere; }
+  .modal .row { display: flex; justify-content: flex-end; gap: 8px; }
+  @keyframes fade { from { opacity: 0; } }
+  @keyframes pop { from { transform: scale(.96); opacity: 0; } }
   @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } .stats { grid-template-columns: 1fr 1fr; } }
 </style>
 </head>
@@ -328,6 +341,30 @@ function flash(msg, tone = "ok") {
   if (tone === "ok") setTimeout(() => { if (box.textContent === msg) box.replaceChildren(); }, 8000);
   window.scrollTo(0, 0);
 }
+// In-app confirmation dialog. Resolves true (confirmed) or false (cancelled).
+function ask({ title, message, ok = "OK", tone = "brand", icon = "?" }) {
+  return new Promise((resolve) => {
+    const prev = document.activeElement;
+    const okBtn = el("button", { class: "btn" + (tone === "money" ? " money" : tone === "danger" ? " danger-solid" : "") }, ok);
+    const cancelBtn = el("button", { class: "btn ghost", style: "padding:10px 16px;font-size:.95rem" }, "Cancel");
+    const box = el("div", { class: `modal tone-${tone}`, role: "dialog", "aria-modal": "true" },
+      el("h3", {}, el("span", { class: "dot" }, icon), title), el("p", {}, message),
+      el("div", { class: "row" }, cancelBtn, okBtn));
+    const bg = el("div", { class: "modal-bg" }, box);
+    const done = (answer) => { document.removeEventListener("keydown", onKey, true); bg.remove(); if (prev) prev.focus(); resolve(answer); };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); done(false); }
+      else if (e.key === "Enter") { e.preventDefault(); done(true); }
+      else if (e.key === "Tab") { e.preventDefault(); (document.activeElement === okBtn ? cancelBtn : okBtn).focus(); }
+    };
+    okBtn.addEventListener("click", () => done(true));
+    cancelBtn.addEventListener("click", () => done(false));
+    bg.addEventListener("click", (e) => { if (e.target === bg) done(false); });
+    document.addEventListener("keydown", onKey, true);
+    document.body.append(bg);
+    okBtn.focus();
+  });
+}
 function fmt(ts) {
   if (!ts) return "";
   return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -383,7 +420,9 @@ async function loadState() {
       el("div", { class: "sub" }, `${(presets[a.preset] || {}).label || a.host}${a.has_password ? "" : " · password missing"}`)),
     el("div", { class: "actions" },
       el("button", { class: "btn ghost", onclick: async (e) => { e.target.disabled = true; const r = await api.test_email(a.email); e.target.disabled = false; flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err"); } }, "Send test email"),
-      el("button", { class: "btn ghost", onclick: async () => { if (confirm(`Remove ${a.email}?`)) { await api.remove_account(a.email); loadState(); } } }, "Remove")))));
+      el("button", { class: "btn ghost", onclick: async () => {
+        if (!await ask({ title: "Remove email account?", message: `${a.email} will no longer be available as a From address. Its saved password is deleted too.`, ok: "Remove", tone: "danger", icon: "!" })) return;
+        await api.remove_account(a.email); loadState(); } }, "Remove")))));
   const sig = s.signature || {};
   $("g-name").value = sig.name || ""; $("g-firm").value = sig.firm || "";
   $("g-license").value = sig.license || ""; $("g-phone").value = sig.phone || "";
@@ -534,7 +573,7 @@ function renderTransactions() {
         el("div", {}, el("label", {}, "Paid with"), method),
         el("div", {}, el("label", {}, "Amount received ($)"), amount),
         el("button", { class: "btn money", onclick: async (e) => {
-          if (!confirm(`Confirm you've received the money in your ${method.value} account? The final plans will be emailed to ${t.client_email} now.`)) return;
+          if (!await ask({ title: "Payment received?", message: `Only confirm once you see the money in your ${method.value} account. The final plans will be emailed to ${t.client_email} right away.`, ok: "Yes, send the plans", tone: "money", icon: "$" })) return;
           e.target.disabled = true; e.target.textContent = "Sending plans…";
           const r = await api.mark_paid(t.id, method.value, amount.value, shortBox.checked);
           e.target.disabled = false; e.target.textContent = "Confirm & send plans";
@@ -544,7 +583,9 @@ function renderTransactions() {
       actions.append(el("button", { class: "btn money small", onclick: () => markForm.classList.toggle("hidden") }, "Mark as paid…"));
     }
     actions.append(el("button", { class: "btn ghost", onclick: async (e) => {
-      if (!confirm(paid ? `Email the final plans to ${t.client_email} again?` : `Email the payment instructions to ${t.client_email} again?`)) return;
+      if (!await ask(paid
+        ? { title: "Resend final plans?", message: `The final plans will be emailed to ${t.client_email} again.`, ok: "Resend", icon: "↻" }
+        : { title: "Resend payment instructions?", message: `The preview${t.has_invoice ? ", invoice" : ""} and payment instructions will be emailed to ${t.client_email} again.`, ok: "Resend", icon: "↻" })) return;
       e.target.disabled = true; const r = await api.resend(t.id); e.target.disabled = false;
       flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err"); loadTransactions(); } }, paid ? "Resend final plans" : "Resend payment instructions"));
     actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "preview") }, "Open preview"));
