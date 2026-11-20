@@ -6,7 +6,7 @@ The client receives a watermarked preview and payment instructions (Zelle or Ven
 
 ## How it works
 
-1. **Send:** choose the PDF, enter the client's email and the price.
+1. **Send:** choose the plan PDF and, optionally, your invoice PDF (the price is read from it), then enter the client's email.
 2. **Client pays:** by Zelle or Venmo, using the reference code in the email.
 3. **Mark as paid:** once the payment arrives, click *Mark as paid*. The final PDF is sent.
 

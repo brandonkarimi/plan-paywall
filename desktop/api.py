@@ -34,7 +34,10 @@ def transaction_view(tx):
         label, tone = "Not paid yet", ""
     return {
         "id": tx["id"], "title": tx["title"], "client_name": tx["client_name"], "client_email": tx["client_email"],
-        "from_email": tx["from_email"], "price": mailer.money(tx["price_cents"]), "status": tx["status"],
+        "from_email": tx["from_email"], "status": tx["status"],
+        "price": mailer.money(tx["price_cents"]) if tx["price_cents"] else "On invoice",
+        "price_value": f"{tx['price_cents'] / 100:.2f}" if tx["price_cents"] else "",
+        "has_invoice": bool(tx.get("invoice_path")),
         "label": label, "tone": tone, "sent_at": tx["sent_at"], "paid_at": tx["paid_at"], "pages": tx["pages"],
         "sha256": tx["sha256"], "share_link": tx["share_link"], "delivery_error": tx["delivery_error"],
         "ref_code": tx.get("ref_code") or "", "paid_method": tx.get("paid_method") or "",
@@ -93,6 +96,26 @@ class Api:
                    size_mb=round(info["size_bytes"] / 1e6, 1),
                    too_big=info["size_bytes"] > config.ATTACH_LIMIT_BYTES)
 
+    def choose_invoice(self):
+        """Pick the invoice PDF and try to read its total so the price can be filled in."""
+        import webview
+
+        from plancore.invoice import find_amount_cents
+        from plancore.pdfinfo import inspect_pdf
+
+        result = self._window.create_file_dialog(webview.FileDialog.OPEN, file_types=("PDF files (*.pdf)",))
+        if not result:
+            return _ok(path=None)
+        path = Path(result[0] if isinstance(result, (list, tuple)) else result)
+        try:
+            with path.open("rb") as f:
+                info = inspect_pdf(f)
+        except Exception as exc:
+            return _err(f"Invoice: {exc}")
+        cents = find_amount_cents(str(path))
+        return _ok(path=str(path), name=path.name, pages=info["page_count"],
+                   amount=f"{cents / 100:.2f}" if cents else "")
+
     def send(self, form):
         try:
             tx_id = sender.send_plans(
@@ -100,6 +123,7 @@ class Api:
                 price=form.get("price", ""), pdf_path=form.get("pdf_path", ""),
                 client_name=form.get("client_name", ""), title=form.get("title", ""),
                 share_link=form.get("share_link", ""), methods=form.get("methods"),
+                invoice_path=form.get("invoice_path", ""),
             )
         except sender.NeedShareLink as exc:
             return _err(exc, need_share_link=True)
@@ -135,7 +159,7 @@ class Api:
     # ------------------------------------------------------------ files & links
     def open_file(self, tx_id, which):
         tx = db.get_tx(int(tx_id))
-        path = tx and tx.get("final_path" if which == "final" else "preview_path")
+        path = tx and tx.get({"final": "final_path", "invoice": "invoice_path"}.get(which, "preview_path"))
         if not path or not Path(path).is_file():
             return _err("That file isn't available.")
         os.startfile(path)  # noqa: S606 - opens in the user's PDF viewer

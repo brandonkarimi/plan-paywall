@@ -47,11 +47,16 @@ def make_preview(final_path: Path, out_path: Path, text: str, settings) -> Path:
     return out_path
 
 
+INVOICE_LIMIT_BYTES = 6 * 1024 * 1024
+
+
 def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="", share_link="", methods=None,
-               settings=None):
+               invoice_path="", settings=None):
     """Returns the new transaction id. Raises SendError (NeedShareLink for very large PDFs).
 
     methods: "zelle" and/or "venmo" (default: every method enabled in Settings).
+    invoice_path: optional invoice PDF, attached to the email as-is. With an invoice the price is optional
+    (0 = "see invoice").
     """
     settings = settings or config.load_settings()
     from_email, to_email = from_email.strip(), to_email.strip()
@@ -66,7 +71,21 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
         raise SendError("Add your Venmo username in Settings.")
     if not EMAIL_RE.match(to_email):
         raise SendError("Enter the client's email address.")
-    price_cents = _price_cents(price)
+    invoice = Path(invoice_path) if invoice_path else None
+    if invoice is not None:
+        if not invoice.is_file():
+            raise SendError("The invoice file can't be found. Choose it again.")
+        with invoice.open("rb") as f:
+            try:
+                inv_info = inspect_pdf(f)
+            except ValueError as exc:
+                raise SendError(f"Invoice: {exc}")
+        if inv_info["size_bytes"] > INVOICE_LIMIT_BYTES:
+            raise SendError("The invoice PDF is too large to email (over 6 MB).")
+    if invoice is not None and not str(price or "").strip():
+        price_cents = 0  # amount is on the invoice
+    else:
+        price_cents = _price_cents(price)
     src = Path(pdf_path or "")
     if not src.is_file():
         raise SendError("Choose the plan PDF to send.")
@@ -101,9 +120,13 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
         shutil.copy2(src, final)
         preview = make_preview(final, folder / "preview.pdf", WATERMARK_TEXT, settings)
         db.update_tx(tx_id, final_path=str(final), preview_path=str(preview))
-        subject, text, html = mailer.invite(db.get_tx(tx_id), settings)
-        mailer.send(from_email, to_email, subject, text, html,
-                    attachments=[(preview, f"PREVIEW - {title}.pdf")], settings=settings)
+        if invoice is not None:
+            stored_invoice = folder / "invoice.pdf"
+            shutil.copy2(invoice, stored_invoice)
+            db.update_tx(tx_id, invoice_path=str(stored_invoice))
+        tx = db.get_tx(tx_id)
+        subject, text, html = mailer.invite(tx, settings)
+        mailer.send(from_email, to_email, subject, text, html, attachments=invite_attachments(tx), settings=settings)
     except Exception as exc:
         db.delete_tx(tx_id)
         shutil.rmtree(folder, ignore_errors=True)
@@ -113,9 +136,21 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
 
     db.update_tx(tx_id, status="sent", sent_at=db.now())
     pay_by = ", ".join(config.PAYMENT_METHODS[m] for m in methods)
-    db.log(tx_id, f"Sent to {to_email} from {from_email} ({mailer.money(price_cents)}, "
-                  f"{info['page_count']} page{'s' if info['page_count'] != 1 else ''}). Pay by: {pay_by}. Ref PLN-{tx_id}")
+    amount = mailer.money(price_cents) if price_cents else "amount on invoice"
+    pages = f"{info['page_count']} page{'s' if info['page_count'] != 1 else ''}"
+    with_invoice = ", invoice attached" if invoice is not None else ""
+    db.log(tx_id, f"Sent to {to_email} from {from_email} ({amount}, {pages}{with_invoice}). Pay by: {pay_by}. "
+                  f"Ref PLN-{tx_id}")
     return tx_id
+
+
+def invite_attachments(tx):
+    """Invoice first (if any), then the watermarked preview."""
+    files = []
+    if tx.get("invoice_path"):
+        files.append((tx["invoice_path"], f"Invoice - {tx['title']}.pdf"))
+    files.append((tx["preview_path"], f"PREVIEW - {tx['title']}.pdf"))
+    return files
 
 
 def mark_paid(tx_id, method, amount=None, allow_short=False, settings=None):
@@ -131,12 +166,15 @@ def mark_paid(tx_id, method, amount=None, allow_short=False, settings=None):
         raise SendError("This one is already marked paid.")
     if method not in config.MANUAL_METHODS:
         raise SendError("Choose how the client paid.")
-    cents = tx["price_cents"] if amount in (None, "") else _price_cents(amount)
-    if cents < tx["price_cents"] and not allow_short:
+    if amount in (None, ""):
+        cents = tx["price_cents"] or None  # price "on invoice" and no amount typed: amount unknown
+    else:
+        cents = _price_cents(amount)
+    if cents is not None and cents < tx["price_cents"] and not allow_short:
         raise SendError(f"That's less than the {mailer.money(tx['price_cents'])} price. Tick “release anyway” to "
                         "send the plans for a partial payment.")
     db.update_tx(tx["id"], status="paid", paid_at=db.now(), amount_paid_cents=cents, paid_method=method)
-    db.log(tx["id"], f"Paid {mailer.money(cents)} via {method} (confirmed by you)")
+    db.log(tx["id"], f"Paid {mailer.money(cents) + ' ' if cents else ''}via {method} (confirmed by you)")
     return deliver(db.get_tx(tx["id"]), settings)
 
 
@@ -173,5 +211,5 @@ def resend(tx_id, settings=None):
         return
     subject, text, html = mailer.invite(tx, settings)
     mailer.send(tx["from_email"], tx["client_email"], subject, text, html,
-                attachments=[(tx["preview_path"], f"PREVIEW - {tx['title']}.pdf")], settings=settings)
+                attachments=invite_attachments(tx), settings=settings)
     db.log(tx_id, "Payment instructions re-sent to client")

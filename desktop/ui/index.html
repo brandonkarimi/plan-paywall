@@ -81,6 +81,8 @@
   .pick.has .doc::after { content: "✓"; position: absolute; right: -8px; bottom: -6px; width: 22px; height: 22px; border-radius: 50%;
     background: var(--money); color: #fff; font-size: .75rem; display: grid; place-items: center; font-weight: 700; }
   .pick .name { font-weight: 600; overflow-wrap: anywhere; }
+  .pick .doc.inv { background: var(--money-deep); }
+  .pick.invoice.has { border-color: var(--money); background: var(--money-soft); }
 
   .muted { color: var(--muted); }
   .small { font-size: .85rem; }
@@ -178,8 +180,9 @@
           <input id="f-name" type="text">
         </div>
         <div>
-          <label for="f-price">Price (USD)</label>
+          <label for="f-price">Price (USD) <span class="opt hidden" id="price-opt">(optional with an invoice)</span></label>
           <input id="f-price" type="text" inputmode="decimal" placeholder="1500.00">
+          <div class="sub hidden" id="price-hint" style="margin-top:4px"></div>
         </div>
         <div class="full">
           <label for="f-title">Project name <span class="opt">(optional, defaults to the file name)</span></label>
@@ -189,10 +192,19 @@
           <label>Client can pay by</label>
           <div id="f-methods" class="methods"></div>
         </div>
-        <div class="full">
+        <div>
+          <label>Plan PDF</label>
           <div class="pick" id="pick" role="button" tabindex="0">
             <span class="doc"></span>
-            <div><div class="name" id="pick-name">Choose the plan PDF…</div><div class="sub" id="pick-info">Click to browse</div></div>
+            <div><div class="name" id="pick-name">Choose the plan PDF…</div><div class="sub" id="pick-info">Sent as a watermarked preview</div></div>
+          </div>
+        </div>
+        <div>
+          <label>Invoice PDF <span class="opt">(optional)</span></label>
+          <div class="pick invoice" id="inv-pick" role="button" tabindex="0">
+            <span class="doc inv"></span>
+            <div style="flex:1;min-width:0"><div class="name" id="inv-name">Attach an invoice…</div><div class="sub" id="inv-info">Sent to the client as-is</div></div>
+            <button class="btn ghost hidden" id="inv-clear" title="Remove invoice" style="padding:4px 10px">✕</button>
           </div>
         </div>
         <div class="full hidden" id="share-wrap">
@@ -202,7 +214,7 @@
         </div>
         <div class="full">
           <button class="btn big" id="send-btn">Send with pay wall</button>
-          <p class="small muted" style="text-align:center;margin:10px 0 0">The client gets a watermarked preview and payment instructions. When their payment arrives, click <b>Mark as paid</b> in Transactions and the final PDF is emailed to them.</p>
+          <p class="small muted" style="text-align:center;margin:10px 0 0">The client gets the watermarked preview, your invoice (if attached) and payment instructions. When their payment arrives, click <b>Mark as paid</b> in Transactions and the final PDF is emailed to them.</p>
         </div>
       </div>
     </div>
@@ -433,18 +445,50 @@ async function pickFile() {
   $("pick-info").textContent = `${r.pages} page${r.pages === 1 ? "" : "s"} · ${r.size_mb} MB · click to change`;
   $("share-wrap").classList.toggle("hidden", !r.too_big);
 }
+let invoice = null, priceFromInvoice = false;
+function priceHint(text) { $("price-hint").textContent = text || ""; $("price-hint").classList.toggle("hidden", !text); }
+async function pickInvoice() {
+  const r = await api.choose_invoice();
+  if (!r.ok) return flash(r.error, "err");
+  if (!r.path) return;
+  invoice = r;
+  $("inv-pick").classList.add("has"); $("inv-clear").classList.remove("hidden");
+  $("inv-name").textContent = r.name;
+  $("inv-info").textContent = r.amount ? `Total found: $${Number(r.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "Attached";
+  $("price-opt").classList.remove("hidden");
+  if (r.amount && (!$("f-price").value.trim() || priceFromInvoice)) {
+    $("f-price").value = r.amount; priceFromInvoice = true;
+    priceHint("Filled in from the invoice. Check it's right.");
+  } else if (!r.amount) {
+    priceHint("Couldn't read a total from this invoice. Enter the price, or leave it blank to just say “see invoice”.");
+  }
+}
+function clearInvoice() {
+  invoice = null;
+  $("inv-pick").classList.remove("has"); $("inv-clear").classList.add("hidden");
+  $("inv-name").textContent = "Attach an invoice…"; $("inv-info").textContent = "Sent to the client as-is";
+  $("price-opt").classList.add("hidden");
+  if (priceFromInvoice) { $("f-price").value = ""; priceFromInvoice = false; }
+  priceHint("");
+}
+$("inv-pick").addEventListener("click", (e) => { if (!e.target.closest("#inv-clear")) pickInvoice(); });
+$("inv-pick").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pickInvoice(); });
+$("inv-clear").addEventListener("click", (e) => { e.stopPropagation(); clearInvoice(); });
+$("f-price").addEventListener("input", () => { priceFromInvoice = false; priceHint(""); });
 $("pick").addEventListener("click", pickFile);
 $("pick").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pickFile(); });
 $("send-btn").addEventListener("click", async () => {
   const b = $("send-btn"); b.disabled = true; b.textContent = "Building preview and sending…";
   const r = await api.send({ from_email: $("f-from").value, to_email: $("f-to").value, client_name: $("f-name").value,
     title: $("f-title").value, price: $("f-price").value, pdf_path: chosen ? chosen.path : "", share_link: $("f-share").value,
-    methods: [...document.querySelectorAll("#f-methods input:checked")].map(i => i.value) });
+    methods: [...document.querySelectorAll("#f-methods input:checked")].map(i => i.value),
+    invoice_path: invoice ? invoice.path : "" });
   b.disabled = false; b.textContent = "Send with pay wall";
   if (!r.ok) { if (r.need_share_link) $("share-wrap").classList.remove("hidden"); return flash(r.error, "err"); }
   ["f-to", "f-name", "f-title", "f-price", "f-share"].forEach(id => $(id).value = "");
   chosen = null; $("pick").classList.remove("has"); $("pick-name").textContent = "Choose the plan PDF…";
-  $("pick-info").textContent = "Click to browse"; $("share-wrap").classList.add("hidden");
+  $("pick-info").textContent = "Sent as a watermarked preview"; $("share-wrap").classList.add("hidden");
+  priceFromInvoice = false; clearInvoice();
   // Jump to the log with the new send opened, so it's obvious where it went.
   $("tx-search").value = "";
   await showTab("tx");
@@ -488,7 +532,7 @@ function renderTransactions() {
     if (!paid) {
       const method = el("select", {}, state.manual_methods.map(m => el("option", { value: m }, m)));
       if (t.pay_by.includes("Venmo") && !t.pay_by.includes("Zelle")) method.value = "Venmo";
-      const amount = el("input", { type: "text", value: t.price.replace("$", ""), style: "width:120px" });
+      const amount = el("input", { type: "text", value: t.price_value, placeholder: "optional", style: "width:120px" });
       const shortBox = el("input", { type: "checkbox" });
       const shortWrap = el("label", { class: "check hidden small" }, shortBox, "Release anyway (partial payment)");
       markForm = el("div", { class: "markpaid hidden" },
@@ -510,6 +554,7 @@ function renderTransactions() {
       flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err"); loadTransactions(); } }, paid ? "Resend final plans" : "Resend payment instructions"));
     actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "preview") }, "Open preview"));
     actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "final") }, "Open final PDF"));
+    if (t.has_invoice) actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "invoice") }, "Open invoice"));
     const d = el("details", { class: "tx", "data-id": t.id },
       el("summary", {},
         el("div", {}, el("div", { class: "title" }, t.title),

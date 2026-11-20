@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     delivery_error TEXT NOT NULL DEFAULT '',
     ref_code TEXT NOT NULL DEFAULT '',
     methods TEXT NOT NULL DEFAULT '[]',        -- how the client may pay: zelle / venmo
-    paid_method TEXT NOT NULL DEFAULT ''       -- Zelle, Venmo, Check, Cash, Other
+    paid_method TEXT NOT NULL DEFAULT '',      -- Zelle, Venmo, Check, Cash, Other
+    invoice_path TEXT NOT NULL DEFAULT ''      -- optional invoice PDF sent with the preview
 );
 CREATE TABLE IF NOT EXISTS activity (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,6 +52,7 @@ UPGRADE_COLUMNS = {
     "ref_code": "TEXT NOT NULL DEFAULT ''",
     "methods": "TEXT NOT NULL DEFAULT '[]'",
     "paid_method": "TEXT NOT NULL DEFAULT ''",
+    "invoice_path": "TEXT NOT NULL DEFAULT ''",
 }
 
 
