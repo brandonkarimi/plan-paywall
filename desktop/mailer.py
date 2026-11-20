@@ -114,57 +114,90 @@ QR_CARD = {
 }
 
 
-def qr_table(text, size=QR_SIZE):
-    """Draw a QR code as plain HTML table cells (no image), so mail apps show it as part of the message:
-    it can't be opened, downloaded or swiped through like a picture, yet scans exactly like the original."""
+def _qr_matrix(text):
     import segno
 
-    matrix = [list(row) for row in segno.make(text, error="m").matrix_iter(scale=1, border=3)]
-    cell = max(3, round(size / len(matrix)))
-    width = cell * len(matrix)
-    rows = []
-    for row in matrix:
+    return [[bool(v) for v in row] for row in segno.make(text, error="m").matrix_iter(scale=1, border=0)]
+
+
+def qr_table(matrix, size=QR_SIZE, modules=None):
+    """Draw a QR matrix as plain HTML table cells (no image), so mail apps show it as part of the message:
+    it can't be opened, downloaded or swiped through like a picture, yet scans exactly like the original.
+
+    ``modules`` pads the quiet zone so codes of different densities come out the same size.
+    """
+    modules = max(modules or 0, len(matrix) + 6)
+    pad = (modules - len(matrix)) // 2
+    blank = [False] * modules
+    rows = [blank] * pad + [[False] * pad + r + [False] * (modules - pad - len(r)) for r in matrix]
+    rows += [blank] * (modules - len(rows))
+    cell = max(3, round(size / modules))
+    width = cell * modules
+    out = []
+    for row in rows:
         tds, x = [], 0
         while x < len(row):
             run = 1
-            while x + run < len(row) and bool(row[x + run]) == bool(row[x]):
+            while x + run < len(row) and row[x + run] == row[x]:
                 run += 1
-            tds.append(f"<td width={run * cell}" + (" bgcolor=#000>" if row[x] else ">") + "</td>")  # kept terse:
-            # a QR code is ~1,000 cells, and Gmail cuts off emails over ~100 KB
+            # Kept terse: a QR code is ~1,000 cells, and Gmail cuts off emails over ~100 KB.
+            tds.append(f"<td width={run * cell}" + (" bgcolor=#000>" if row[x] else ">") + "</td>")
             x += run
         # One table per row: rows have different run lengths, so they can't share a column grid.
-        rows.append(f"<table cellpadding=0 cellspacing=0 border=0 width={width}><tr height={cell}>{''.join(tds)}</tr></table>")
+        out.append(f"<table cellpadding=0 cellspacing=0 border=0 width={width}><tr height={cell}>{''.join(tds)}</tr></table>")
     return (f"<div style='width:{width}px;margin:0 auto;background:#ffffff;font-size:0;line-height:0'>"
-            + "".join(rows) + "</div>")
+            + "".join(out) + "</div>")
+
+
+def _zelle_contact(qr_link):
+    """The phone/email a Zelle QR code pays, e.g. 714-932-0775 ("" if it can't be read)."""
+    import base64
+    import json
+    from urllib.parse import parse_qs, urlparse
+
+    try:
+        data = parse_qs(urlparse(qr_link).query)["data"][0]
+        token = str(json.loads(base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)))["token"]).strip()
+    except (KeyError, IndexError, ValueError, TypeError):
+        return ""
+    digits = token[1:] if len(token) == 11 and token.startswith("1") else token
+    return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}" if digits.isdigit() and len(digits) == 10 else token
+
+
+CARD_WIDTH = 270  # px; both cards share it, and two side by side fit the 600px message width
 
 
 def _qr_block(tx, settings):
     from desktop import images
 
-    cells = []
+    cards = []
     for method in tx.get("methods") or []:
         text = images.qr_text(f"{method}_qr")
         if not text:
             continue
-        label, color, caption = QR_CARD[method]
         if method == "zelle":
-            z = settings.get("zelle") or {}
-            who = " · ".join(x for x in (z.get("name"), z.get("recipient")) if x)
+            who = (settings.get("zelle") or {}).get("recipient", "").strip() or _zelle_contact(text)
         else:
             user = (settings.get("venmo") or {}).get("username", "").strip().lstrip("@")
             who = f"@{user}" if user else ""
-        cells.append(
-            "<td style='padding:0 14px 12px 0;vertical-align:top'>"
-            "<div style='border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px 12px;text-align:center'>"
-            f"<div style='font-size:20px;font-weight:700;color:{color};margin-bottom:10px'>{label}</div>"
-            + qr_table(text)
-            + f"<div style='font-size:13px;color:#444;margin-top:10px'>{caption}</div>"
-            + (f"<div style='font-size:13px;font-weight:600;color:#16191d'>{escape(who)}</div>" if who else "")
-            + "</div></td>")
-    if not cells:
+        cards.append((method, who, _qr_matrix(text)))
+    if not cards:
         return None
-    return {"html": "<table role='presentation' cellpadding='0' cellspacing='0' style='margin:2px 0 18px'><tr>"
-                    + "".join(cells) + "</tr></table>"}
+    modules = max(len(m) for _, _, m in cards) + 6  # same size for every code
+    cells = []
+    for i, (method, who, matrix) in enumerate(cards):
+        label, color, caption = QR_CARD[method]
+        if i:
+            cells.append("<td width=14 style='width:14px'></td>")
+        cells.append(
+            f"<td width={CARD_WIDTH} valign=top style='width:{CARD_WIDTH}px;border:1px solid #e5e7eb;"
+            "border-radius:12px;padding:14px 0 12px;text-align:center;vertical-align:top'>"
+            f"<div style='font-size:20px;font-weight:700;color:{color}'>{label}</div>"
+            f"<div style='font-size:15px;font-weight:600;color:#16191d;margin:2px 0 10px'>{escape(who) or '&nbsp;'}</div>"
+            + qr_table(matrix, modules=modules)
+            + f"<div style='font-size:13px;color:#444;margin-top:10px'>{caption}</div></td>")
+    return {"html": "<table role='presentation' cellpadding=0 cellspacing=0 style='margin:2px 0 18px;"
+                    "border-collapse:separate'><tr>" + "".join(cells) + "</tr></table>"}
 
 
 def invite(tx, settings):
@@ -183,8 +216,11 @@ def invite(tx, settings):
     if "zelle" in methods:
         z = settings.get("zelle") or {}
         name = f" ({z['name']})" if z.get("name") else ""
-        if z.get("recipient"):
-            options.append(f"Zelle: send {pay} to {z['recipient']}{name}")
+        from desktop import images
+
+        to = z.get("recipient") or _zelle_contact(images.qr_text("zelle_qr"))
+        if to:
+            options.append(f"Zelle: send {pay} to {to}{name}")
         else:
             options.append(f"Zelle: send {pay} using the QR code below")
     if "venmo" in methods:

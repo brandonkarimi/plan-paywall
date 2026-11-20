@@ -399,3 +399,40 @@ def test_settings_accept_a_method_with_only_a_qr_code(env):
     assert not r["ok"] and "QR code" in r["error"]
     images.store("zelle_qr", _qr(env["tmp"] / "z.png", ZELLE_LINK))
     assert Api().save_settings({"zelle": {"enabled": True, "recipient": "", "name": ""}})["ok"]
+
+
+def _zelle_link(token):
+    import base64
+    import json
+
+    data = base64.urlsafe_b64encode(json.dumps({"token": token, "name": "MKD"}).encode()).decode().rstrip("=")
+    return f"https://enroll.zellepay.com/qr-codes?data={data}"
+
+
+@pytest.mark.parametrize("token, shown", [("7149320775", "714-932-0775"), ("17149320775", "714-932-0775"),
+                                          ("pay@mkd.test", "pay@mkd.test")])
+def test_zelle_contact_is_read_from_the_qr_code(token, shown):
+    from desktop.mailer import _zelle_contact
+
+    assert _zelle_contact(_zelle_link(token)) == shown
+    assert _zelle_contact("https://example.test/not-zelle") == ""
+
+
+def test_cards_show_contact_and_are_the_same_size(env):
+    import re
+
+    from desktop import images
+
+    settings = config.load_settings()
+    settings["zelle"] = {"enabled": True, "recipient": "", "name": ""}
+    config.save_settings(settings)
+    images.store("zelle_qr", _qr(env["tmp"] / "z.png", _zelle_link("7149320775") + "&long=" + "x" * 80))
+    images.store("venmo_qr", _qr(env["tmp"] / "v.png", VENMO_LINK))
+    sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
+                      pdf_path=env["pdf"], settings=config.load_settings())
+    msg = env["smtp"].sent[-1]
+    html = msg.get_body(("html",)).get_content()
+    assert "714-932-0775" in html and "@AcmeCivil-Eng" in html
+    assert "Zelle: send $100.00 to 714-932-0775" in msg.get_body(("plain",)).get_content()
+    assert len(set(re.findall(r"<div style='width:(\d+)px;margin:0 auto", html))) == 1  # QR codes match
+    assert len(set(re.findall(r"<td width=(\d+) valign=top", html))) == 1  # so do the cards
