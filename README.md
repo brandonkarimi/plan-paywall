@@ -34,4 +34,3 @@ powershell -ExecutionPolicy Bypass -File desktop\build.ps1   # build the .exe
 
 - Data is stored locally in `%APPDATA%\PlanSender`. Email passwords are kept in Windows Credential Manager.
 - Previews are image-only and watermarked, so they can't be edited or reused as final plans.
-- Venmo requires a business profile to accept payments for services.
