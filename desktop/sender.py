@@ -67,10 +67,10 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
                if m in config.PAYMENT_METHODS]
     if not methods:
         raise SendError("Choose how the client can pay (set up Zelle or Venmo in Settings).")
-    if "zelle" in methods and not settings["zelle"].get("recipient"):
-        raise SendError("Add your Zelle email or phone in Settings.")
-    if "venmo" in methods and not settings["venmo"].get("username"):
-        raise SendError("Add your Venmo username in Settings.")
+    if "zelle" in methods and not config.method_ready("zelle", settings):
+        raise SendError("Add your Zelle email or phone, or your Zelle QR code, in Settings.")
+    if "venmo" in methods and not config.method_ready("venmo", settings):
+        raise SendError("Add your Venmo username, or your Venmo QR code, in Settings.")
     if not EMAIL_RE.match(to_email):
         raise SendError("Enter the client's email address.")
     invoice = Path(invoice_path) if invoice_path else None

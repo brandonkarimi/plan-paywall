@@ -236,8 +236,10 @@ class Api:
                 clean = {k: (v.strip() if isinstance(v, str) else bool(v)) for k, v in payload[field].items()}
                 if field == "venmo":
                     clean["username"] = clean.get("username", "").lstrip("@")
-                if clean.get("enabled") and not (clean.get("recipient") or clean.get("username")):
-                    return _err(f"Enter your {field.title()} {'email or phone' if field == 'zelle' else 'username'}, "
+                if clean.get("enabled") and not (clean.get("recipient") or clean.get("username")
+                                                 or config.image_path(f"{field}_qr")):
+                    return _err(f"Enter your {field.title()} {'email or phone' if field == 'zelle' else 'username'} "
+                                f"or add your {field.title()} QR code, "
                                 f"or switch {field.title()} off.")
                 settings[field] = {**settings[field], **clean}
         config.save_settings(settings)

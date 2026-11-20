@@ -157,10 +157,13 @@ def invite(tx, settings):
     if "zelle" in methods:
         z = settings.get("zelle") or {}
         name = f" ({z['name']})" if z.get("name") else ""
-        options.append(f"Zelle: send {pay} to {z.get('recipient', '')}{name}")
+        if z.get("recipient"):
+            options.append(f"Zelle: send {pay} to {z['recipient']}{name}")
+        else:
+            options.append(f"Zelle: send {pay} using the QR code below")
     if "venmo" in methods:
         user = (settings.get("venmo") or {}).get("username", "").strip().lstrip("@")
-        options.append(f"Venmo: send {pay} to @{user}")
+        options.append(f"Venmo: send {pay} to @{user}" if user else f"Venmo: send {pay} using the QR code below")
     if len(options) > 1:
         # Make it obvious the client only needs to use one of them.
         paragraphs.append(["You can pay with Zelle or Venmo, whichever you prefer:"] + [f"  • {o}" for o in options])

@@ -318,3 +318,38 @@ def test_bad_picture_is_rejected(env):
     with pytest.raises(images.ImageError):
         images.store("zelle_qr", bad)
     assert config.image_path("zelle_qr") is None
+
+
+def test_qr_code_alone_is_enough_to_offer_a_method(env):
+    from desktop import images
+
+    settings = config.load_settings()
+    settings["zelle"] = {"enabled": True, "recipient": "", "name": ""}
+    settings["venmo"] = {"enabled": True, "username": ""}
+    config.save_settings(settings)
+    assert config.enabled_methods() == []
+    with pytest.raises(sender.SendError, match="QR code"):
+        sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
+                          pdf_path=env["pdf"], methods=["zelle"], settings=config.load_settings())
+
+    images.store("zelle_qr", _png(env["tmp"] / "z.png"))
+    images.store("venmo_qr", _png(env["tmp"] / "v.png"))
+    assert config.enabled_methods() == ["zelle", "venmo"]
+    sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
+                      pdf_path=env["pdf"], settings=config.load_settings())
+    msg = env["smtp"].sent[-1]
+    text = msg.get_body(("plain",)).get_content()
+    assert "Zelle: send $100.00 using the QR code below" in text
+    assert "Venmo: send $100.00 using the QR code below" in text
+    html = msg.get_body(("html",)).get_content()
+    assert "venmo.com/u/" not in html and "cid:zelle-qr@plansender" in html
+
+
+def test_settings_accept_a_method_with_only_a_qr_code(env):
+    from desktop import images
+    from desktop.api import Api
+
+    r = Api().save_settings({"zelle": {"enabled": True, "recipient": "", "name": ""}})
+    assert not r["ok"] and "QR code" in r["error"]
+    images.store("zelle_qr", _png(env["tmp"] / "z.png"))
+    assert Api().save_settings({"zelle": {"enabled": True, "recipient": "", "name": ""}})["ok"]

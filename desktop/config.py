@@ -100,12 +100,13 @@ def save_settings(settings: dict):
 
 def enabled_methods(settings=None) -> list:
     settings = settings or load_settings()
-    methods = []
-    if settings["zelle"].get("enabled") and settings["zelle"].get("recipient"):
-        methods.append("zelle")
-    if settings["venmo"].get("enabled") and settings["venmo"].get("username"):
-        methods.append("venmo")
-    return methods
+    return [m for m in PAYMENT_METHODS if settings[m].get("enabled") and method_ready(m, settings)]
+
+
+def method_ready(method, settings) -> bool:
+    """A payment method can be offered once clients have a way to pay: the typed details or a QR code."""
+    typed = settings[method].get("recipient" if method == "zelle" else "username")
+    return bool(typed or image_path(f"{method}_qr"))
 
 
 def account_for(email: str, settings=None):
