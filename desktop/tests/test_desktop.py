@@ -174,6 +174,21 @@ def test_api_accounts_totals_and_csv(env, tmp_path):
     assert not a.save_settings({"zelle": {"enabled": True, "recipient": ""}})["ok"]
 
 
+def test_delete_one_transaction_keeps_the_others(env):
+    from desktop.api import Api
+    a = Api()
+    keep, gone = send(env, title="Keep me"), send(env, title="Delete me")
+    gone_files = config.data_dir() / "files" / str(gone)
+    assert gone_files.is_dir() and db.activity(gone)
+    r = a.delete_tx(gone)
+    assert r["ok"] and "Delete me" in r["message"]
+    assert db.get_tx(gone) is None and not db.activity(gone) and not gone_files.exists()
+    assert db.get_tx(keep) and (config.data_dir() / "files" / str(keep)).is_dir()
+    assert [t["title"] for t in a.transactions()["items"]] == ["Keep me"]
+    assert not a.delete_tx(gone)["ok"]
+    assert send(env) > gone  # ids are never reused
+
+
 def test_every_email_carries_the_signature_with_inline_logo(env):
     from PIL import Image
     from desktop import images, mailer
@@ -470,12 +485,12 @@ def _zelle_link(token):
     import base64
     import json
 
-    data = base64.urlsafe_b64encode(json.dumps({"token": token, "name": "MKD"}).encode()).decode().rstrip("=")
+    data = base64.urlsafe_b64encode(json.dumps({"token": token, "name": "ACME"}).encode()).decode().rstrip("=")
     return f"https://enroll.zellepay.com/qr-codes?data={data}"
 
 
-@pytest.mark.parametrize("token, shown", [("7149320775", "714-932-0775"), ("17149320775", "714-932-0775"),
-                                          ("pay@mkd.test", "pay@mkd.test")])
+@pytest.mark.parametrize("token, shown", [("5551234567", "555-123-4567"), ("15551234567", "555-123-4567"),
+                                          ("pay@acme.test", "pay@acme.test")])
 def test_zelle_contact_is_read_from_the_qr_code(token, shown):
     from desktop.mailer import _zelle_contact
 
@@ -491,14 +506,14 @@ def test_cards_show_contact_and_are_the_same_size(env):
     settings = config.load_settings()
     settings["zelle"] = {"enabled": True, "recipient": "", "name": ""}
     config.save_settings(settings)
-    images.store("zelle_qr", _qr(env["tmp"] / "z.png", _zelle_link("7149320775") + "&long=" + "x" * 80))
+    images.store("zelle_qr", _qr(env["tmp"] / "z.png", _zelle_link("5551234567") + "&long=" + "x" * 80))
     images.store("venmo_qr", _qr(env["tmp"] / "v.png", VENMO_LINK))
     sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
                       pdf_path=env["pdf"], settings=config.load_settings())
     msg = env["smtp"].sent[-1]
     html = msg.get_body(("html",)).get_content()
-    assert "714-932-0775" in html and "@AcmeCivil-Eng" in html
-    assert "Zelle: send $100.00 to 714-932-0775" in msg.get_body(("plain",)).get_content()
+    assert "555-123-4567" in html and "@AcmeCivil-Eng" in html
+    assert "Zelle: send $100.00 to 555-123-4567" in msg.get_body(("plain",)).get_content()
     assert len(set(re.findall(r"<div style='width:(\d+)px;margin:0 auto", html))) == 1  # QR codes match
     assert len(set(re.findall(r"<td width=(\d+) valign=top", html))) == 1  # so do the cards
 

@@ -214,6 +214,16 @@ class Api:
         write_csv(path)
         return _ok(path=str(path))
 
+    def delete_tx(self, tx_id):
+        """Delete one transaction, its history and its stored PDFs."""
+        tx = db.get_tx(tx_id)
+        if not tx:
+            return _err("That transaction no longer exists.")
+        db.delete_tx(tx_id)
+        shutil.rmtree(config.data_dir() / "files" / str(int(tx_id)), ignore_errors=True)
+        log.info("Transaction %s deleted", tx_id)
+        return _ok(message=f"Deleted “{tx['title']}” and its stored files.")
+
     def reset_log(self, confirm):
         """Delete every transaction, its log and its stored PDFs. Requires typing DELETE."""
         if (confirm or "").strip().upper() != "DELETE":

@@ -682,6 +682,10 @@ function renderTransactions() {
     actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "preview") }, "Open preview"));
     actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "final") }, "Open full plans"));
     if (t.has_invoice) actions.append(el("button", { class: "btn ghost", onclick: () => api.open_file(t.id, "invoice") }, "Open invoice"));
+    actions.append(el("button", { class: "btn ghost danger", style: "margin-left:auto", onclick: async () => {
+      if (!await ask({ title: "Delete this transaction?", message: `“${t.title}” for ${t.client_email} will be removed from the log, along with its history and stored PDFs.${paid ? "" : " It's not paid yet, so it can't be marked paid afterwards."} This can't be undone.`, ok: "Delete", tone: "danger", icon: "!" })) return;
+      const r = await api.delete_tx(t.id);
+      flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err"); loadTransactions(); } }, "Delete"));
     const d = el("details", { class: "tx", "data-id": t.id },
       el("summary", {},
         el("div", {}, el("div", { class: "title" }, t.title),

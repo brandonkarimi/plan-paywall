@@ -200,7 +200,7 @@ def qr_table(matrix, size=QR_SIZE, modules=None):
 
 
 def _zelle_contact(qr_link):
-    """The phone/email a Zelle QR code pays, e.g. 714-932-0775 ("" if it can't be read)."""
+    """The phone/email a Zelle QR code pays, e.g. 555-123-4567 ("" if it can't be read)."""
     import base64
     import json
     from urllib.parse import parse_qs, urlparse

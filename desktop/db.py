@@ -132,6 +132,7 @@ def list_txs(statuses=None):
 
 def delete_tx(tx_id):
     with connect() as c:
+        c.execute("DELETE FROM activity WHERE tx_id = ?", [tx_id])
         c.execute("DELETE FROM transactions WHERE id = ?", [tx_id])
 
 
