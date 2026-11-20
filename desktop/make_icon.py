@@ -21,7 +21,7 @@ def draw(size=256):
 
 if __name__ == "__main__":
     img = draw()
-    img.resize((64, 64), Image.LANCZOS).save(ROOT / "desktop" / "ui" / "icon.png")
+    img.resize((128, 128), Image.LANCZOS).save(ROOT / "desktop" / "ui" / "icon.png")
     (ROOT / "build").mkdir(exist_ok=True)
     img.save(ROOT / "build" / "PlanSender.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
     print("icons written")
