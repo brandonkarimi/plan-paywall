@@ -31,7 +31,7 @@
 
   /* ---------- top bar ---------- */
   .topbar { background: var(--topbar); color: var(--brand-text); }
-  .topbar .inner { max-width: 960px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; gap: 18px; }
+  .topbar .inner { max-width: 1240px; margin: 0 auto; padding: 12px 20px; display: flex; align-items: center; gap: 18px; }
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.15rem; letter-spacing: .2px; }
   .brand img { width: 32px; height: 32px; border-radius: 8px; box-shadow: 0 0 0 2px rgba(255, 255, 255, .25); }
   nav { display: flex; gap: 4px; background: rgba(255, 255, 255, .12); border-radius: 11px; padding: 4px; }
@@ -47,7 +47,7 @@
     border-radius: 10px; cursor: pointer; display: grid; place-items: center; }
   .gear:hover, .gear.active, .theme-btn:hover { background: rgba(255, 255, 255, .25); }
 
-  .wrap { max-width: 960px; margin: 0 auto; padding: 20px 20px 40px; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 20px 20px 40px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; margin-bottom: 16px;
     box-shadow: var(--shadow); }
   .card h2 { font-size: 1.05rem; margin: 0 0 14px; display: flex; align-items: center; gap: 10px; }
@@ -398,6 +398,16 @@ function fmt(ts) {
   if (!ts) return "";
   return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
+
+// ------------------------------------------------------------ fit to window
+// The Send page fits in about 1040 x 720. Bigger windows (up to full screen) scale everything up
+// so the page fills the space instead of leaving wide empty margins; smaller windows keep normal size.
+function fitToWindow() {
+  const scale = Math.min(window.innerWidth / 1040, window.innerHeight / 720);
+  document.body.style.zoom = Math.max(1, Math.min(scale, 1.6)).toFixed(3);
+}
+fitToWindow();
+window.addEventListener("resize", fitToWindow);
 
 // ------------------------------------------------------------ theme
 // Saved in settings; also cached in localStorage so the window opens in the right theme without a flash.
