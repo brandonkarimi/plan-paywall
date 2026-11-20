@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from desktop import config, db, mailer, sender
+from desktop import config, db, sender
 
 
 def send(env, **over):
@@ -40,7 +40,7 @@ def test_send_emails_preview_and_instructions_but_never_the_final(env):
     assert text.startswith("Hello Jo Smith,")
     assert "Here is a preview of your plans for Lot 7 Grading. To receive the full PDF, please pay $1,500.00." in text
     assert "Zelle: send $1,500.00 to pat@acmecivil.test (Pat Lee)" in text
-    assert f"https://venmo.com/AcmeCivil-Eng?txn=pay&amount=1500.00&note=PLN-{tx_id}%20Lot%207%20Grading" in text
+    assert "Venmo: send $1,500.00 to @AcmeCivil-Eng" in text and "venmo.com" not in text  # no Venmo button
     assert "Once payment is received, the full PDF will be emailed to you." in text
     for detail in (tx["sha256"], "fingerprint", "Sheets:", "Memo"):  # no extra details any more
         assert detail not in text
@@ -52,7 +52,7 @@ def test_send_emails_preview_and_instructions_but_never_the_final(env):
 def test_send_with_one_method(env):
     send(env, methods=["zelle"])
     text = body(env["smtp"].sent[0])
-    assert "Zelle" in text and "venmo.com" not in text
+    assert "Zelle" in text and "Venmo" not in text
 
 
 @pytest.mark.parametrize("over, message", [
@@ -90,11 +90,6 @@ def test_failed_email_rolls_back(env):
     with pytest.raises(sender.SendError, match="Email login failed"):
         send(env)
     assert db.list_txs(["draft", "sent"]) == []
-
-
-def test_venmo_link_encoding():
-    assert mailer.venmo_link("@pat lee", 12345, "PLN-3 A&B") == \
-        "https://venmo.com/pat%20lee?txn=pay&amount=123.45&note=PLN-3%20A%26B"
 
 
 # ------------------------------------------------------------------ marking paid

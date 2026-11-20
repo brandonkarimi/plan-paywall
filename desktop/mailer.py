@@ -5,7 +5,6 @@ from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 from html import escape
 from pathlib import Path
-from urllib.parse import quote
 
 from desktop import config
 
@@ -105,12 +104,6 @@ def _greeting(tx):
     return f"Hello {tx['client_name']}," if tx.get("client_name") else "Hello,"
 
 
-def venmo_link(username, cents, note):
-    user = username.strip().lstrip("@")
-    amount = f"&amount={cents / 100:.2f}" if cents else ""
-    return f"https://venmo.com/{quote(user)}?txn=pay{amount}&note={quote(note)}"
-
-
 def invite(tx, settings):
     """The preview email: greeting, one short message, how to pay. The preview (and invoice) are attached."""
     cents = tx["price_cents"]
@@ -123,21 +116,15 @@ def invite(tx, settings):
     else:
         intro = f"Here is a preview of your plans for {tx['title']}. To receive the full PDF, please pay {price}."
     paragraphs = [_greeting(tx), intro]
-    buttons = []
     if "zelle" in methods:
         z = settings.get("zelle") or {}
         name = f" ({z['name']})" if z.get("name") else ""
         paragraphs.append(f"Zelle: send {pay} to {z.get('recipient', '')}{name}")
     if "venmo" in methods:
         user = (settings.get("venmo") or {}).get("username", "").strip().lstrip("@")
-        p = f"Venmo: send {pay} to @{user}"
-        paragraphs.append(p)
-        # The reference is pre-filled in Venmo's note so the payment is easy to match; the client doesn't type it.
-        note = f"{tx.get('ref_code') or 'PLN-' + str(tx['id'])} {tx['title']}"
-        buttons.append({"after": p, "label": f"Pay {price} with Venmo" if price else "Pay with Venmo",
-                        "color": "#008cff", "url": venmo_link(user, cents, note)})
+        paragraphs.append(f"Venmo: send {pay} to @{user}")
     paragraphs.append("Once payment is received, the full PDF will be emailed to you.")
-    text, html = _wrap(paragraphs, settings, buttons)
+    text, html = _wrap(paragraphs, settings)
     return f"Preview: {tx['title']}", text, html
 
 

@@ -53,7 +53,7 @@ def test_invoice_without_price(env, invoice):
     text = body(msg)
     assert "along with your invoice. To receive the full PDF, please pay the invoice." in text
     assert "Zelle: send the invoice amount to pat@acmecivil.test" in text
-    assert f"https://venmo.com/AcmeCivil-Eng?txn=pay&note=PLN-{tx_id}" in text  # no amount pre-filled
+    assert "Venmo: send the invoice amount to @AcmeCivil-Eng" in text
     assert "amount on invoice" in log_texts(tx_id)[0] and "invoice attached" in log_texts(tx_id)[0]
 
 
