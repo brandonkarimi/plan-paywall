@@ -267,11 +267,12 @@ def test_qr_codes_are_embedded_in_the_preview_email(env):
     msg = env["smtp"].sent[-1]
     html = msg.get_body(("html",)).get_content()
     assert "cid:zelle-qr@plansender" in html and "cid:venmo-qr@plansender" in html
-    assert "https://venmo.com/u/AcmeCivil-Eng" in html
-    cids = {p["Content-ID"] for p in msg.walk() if p.get_content_type() == "image/png"}
-    assert cids == {"<zelle-qr@plansender>", "<venmo-qr@plansender>"}
-    # Only the PDFs are listed as attachments; the QR codes sit inside the message.
-    assert [a.get_filename() for a in msg.iter_attachments() if a.get_content_type() == "application/pdf"]
+    assert "<a " not in html  # the QR codes are plain pictures, not links
+    qrs = [p for p in msg.walk() if p.get_content_type() == "image/png"]
+    assert {p["Content-ID"] for p in qrs} == {"<zelle-qr@plansender>", "<venmo-qr@plansender>"}
+    # The QR codes sit inside the message; mail apps only list the PDFs as attachments.
+    assert all(p.get_filename() is None and p["Content-Disposition"] is None for p in qrs)
+    assert {a.get_content_type() for a in msg.iter_attachments()} == {"application/pdf"}
 
 
 def test_only_the_chosen_methods_qr_code_is_shown(env):
@@ -342,7 +343,7 @@ def test_qr_code_alone_is_enough_to_offer_a_method(env):
     assert "Zelle: send $100.00 using the QR code below" in text
     assert "Venmo: send $100.00 using the QR code below" in text
     html = msg.get_body(("html",)).get_content()
-    assert "venmo.com/u/" not in html and "cid:zelle-qr@plansender" in html
+    assert "cid:zelle-qr@plansender" in html
 
 
 def test_settings_accept_a_method_with_only_a_qr_code(env):

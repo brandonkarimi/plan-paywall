@@ -33,8 +33,9 @@ def send(from_email, to, subject, text, html=None, attachments=(), settings=None
         msg.add_alternative(html, subtype="html")
         html_part = msg.get_payload()[-1]
         for cid, path in inline_images:
-            html_part.add_related(Path(path).read_bytes(), maintype="image", subtype="png", cid=f"<{cid}>",
-                                  disposition="inline", filename=Path(path).name)
+            # No filename or disposition: mail apps then show it only inside the message, never as an attachment.
+            html_part.add_related(Path(path).read_bytes(), maintype="image", subtype="png", cid=f"<{cid}>")
+            del html_part.get_payload()[-1]["Content-Disposition"]
     for path, filename in attachments:
         msg.add_attachment(Path(path).read_bytes(), maintype="application", subtype="pdf", filename=filename)
 
@@ -121,6 +122,9 @@ def payment_images(tx, settings=None):
     return out
 
 
+QR_WIDTH = 260  # px in the email; two side by side still fit the 600px message width
+
+
 def _qr_block(tx, settings):
     images = payment_images(tx, settings)
     if not images:
@@ -128,14 +132,10 @@ def _qr_block(tx, settings):
     cells = []
     for method, cid, _ in images:
         label = config.PAYMENT_METHODS[method]
-        img = (f"<img src='cid:{cid}' alt='{label} QR code' width='180' style='display:block;width:180px;height:auto;"
-               f"border:1px solid #e5e7eb;border-radius:8px'>")
+        img = (f"<img src='cid:{cid}' alt='{label} QR code' width='{QR_WIDTH}' style='display:block;width:{QR_WIDTH}px;"
+               f"max-width:100%;height:auto;border:1px solid #e5e7eb;border-radius:8px;pointer-events:none'>")
         caption = "Scan with your banking app" if method == "zelle" else "Scan with the Venmo app"
-        user = (settings.get("venmo") or {}).get("username", "").strip().lstrip("@")
-        if method == "venmo" and user:
-            img = f"<a href='https://venmo.com/u/{escape(user)}'>{img}</a>"
-            caption += " or tap the code"
-        cells.append(f"<td style='padding:0 18px 0 0;vertical-align:top;text-align:center'>{img}"
+        cells.append(f"<td style='padding:0 18px 12px 0;vertical-align:top;text-align:center'>{img}"
                      f"<div style='font-size:13px;color:#555;margin-top:6px'><b>{label}</b><br>{caption}</div></td>")
     return {"html": "<table role='presentation' cellpadding='0' cellspacing='0' style='margin:2px 0 18px'><tr>"
                     + "".join(cells) + "</tr></table>"}
