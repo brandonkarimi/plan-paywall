@@ -257,41 +257,87 @@ def _png(path, color=(30, 60, 110), size=(60, 40), bg="white"):
     return path
 
 
-def test_qr_codes_are_embedded_in_the_preview_email(env):
+def _qr(path, text):
+    import segno
+
+    segno.make(text).save(str(path), scale=8)
+    return path
+
+
+ZELLE_LINK = "https://enroll.zellepay.com/qr-codes?data=test"
+VENMO_LINK = "https://venmo.com/code?user_id=123"
+
+
+def _scan_html_qr(html):
+    """Rebuild the QR grid drawn in the email and scan it, as a phone would."""
+    import re
+
+    import zxingcpp
+    from PIL import Image
+
+    found = []
+    for block in re.findall(r"<div style='width:\d+px;margin:0 auto.*?</div>", html, re.S):
+        rows = re.findall(r"<tr height=(\d+)>(.*?)</tr>", block)
+        cell = int(rows[0][0])
+        width = sum(int(w) for w, _ in re.findall(r"<td width=(\d+)( bgcolor=#000)?>", rows[0][1]))
+        img = Image.new("L", (width, cell * len(rows)), 255)
+        for y, (_, tds) in enumerate(rows):
+            x = 0
+            for w, dark in re.findall(r"<td width=(\d+)( bgcolor=#000)?>", tds):
+                if dark:
+                    img.paste(0, (x, y * cell, x + int(w), (y + 1) * cell))
+                x += int(w)
+        found += [r.text for r in zxingcpp.read_barcodes(img.resize((width * 2, img.height * 2)))]
+    return found
+
+
+def test_qr_codes_are_drawn_into_the_email_not_attached(env):
     from desktop import images
 
-    images.store("zelle_qr", _png(env["tmp"] / "z.png"))
-    images.store("venmo_qr", _png(env["tmp"] / "v.jpg"))
+    images.store("zelle_qr", _qr(env["tmp"] / "z.png", ZELLE_LINK))
+    images.store("venmo_qr", _qr(env["tmp"] / "v.png", VENMO_LINK))
     sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
                       pdf_path=env["pdf"], settings=config.load_settings())
     msg = env["smtp"].sent[-1]
     html = msg.get_body(("html",)).get_content()
-    assert "cid:zelle-qr@plansender" in html and "cid:venmo-qr@plansender" in html
-    assert "<a " not in html  # the QR codes are plain pictures, not links
-    qrs = [p for p in msg.walk() if p.get_content_type() == "image/png"]
-    assert {p["Content-ID"] for p in qrs} == {"<zelle-qr@plansender>", "<venmo-qr@plansender>"}
-    # The QR codes sit inside the message; mail apps only list the PDFs as attachments.
-    assert all(p.get_filename() is None and p["Content-Disposition"] is None for p in qrs)
+    assert _scan_html_qr(html) == [ZELLE_LINK, VENMO_LINK]
+    assert "<a " not in html and "<img" not in html  # nothing to click, open or swipe through
+    assert not [p for p in msg.walk() if p.get_content_maintype() == "image"]
     assert {a.get_content_type() for a in msg.iter_attachments()} == {"application/pdf"}
+    assert len(html.encode()) < 90_000  # Gmail cuts off messages over ~100 KB
 
 
 def test_only_the_chosen_methods_qr_code_is_shown(env):
     from desktop import images
 
-    images.store("zelle_qr", _png(env["tmp"] / "z.png"))
-    images.store("venmo_qr", _png(env["tmp"] / "v.png"))
+    images.store("zelle_qr", _qr(env["tmp"] / "z.png", ZELLE_LINK))
+    images.store("venmo_qr", _qr(env["tmp"] / "v.png", VENMO_LINK))
     sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
                       pdf_path=env["pdf"], methods=["venmo"], settings=config.load_settings())
-    html = env["smtp"].sent[-1].get_body(("html",)).get_content()
-    assert "venmo-qr" in html and "zelle-qr" not in html
+    assert _scan_html_qr(env["smtp"].sent[-1].get_body(("html",)).get_content()) == [VENMO_LINK]
 
 
 def test_no_qr_codes_without_pictures(env):
     sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
                       pdf_path=env["pdf"], settings=config.load_settings())
-    msg = env["smtp"].sent[-1]
-    assert "cid:" not in msg.get_body(("html",)).get_content()
-    assert not [p for p in msg.walk() if p.get_content_maintype() == "image"]
+    assert _scan_html_qr(env["smtp"].sent[-1].get_body(("html",)).get_content()) == []
+
+
+def test_picture_without_a_qr_code_is_rejected(env):
+    from desktop import images
+
+    with pytest.raises(images.ImageError, match="QR code"):
+        images.store("zelle_qr", _png(env["tmp"] / "plain.png"))
+    assert config.image_path("zelle_qr") is None
+
+
+def test_removing_a_qr_code_forgets_it(env):
+    from desktop import images
+
+    images.store("venmo_qr", _qr(env["tmp"] / "v.png", VENMO_LINK))
+    assert images.qr_text("venmo_qr") == VENMO_LINK
+    images.remove("venmo_qr")
+    assert images.qr_text("venmo_qr") == "" and not list(config.images_dir().glob("venmo_qr.*"))
 
 
 def test_watermark_logo_background_is_removed_and_used_on_previews(env):
@@ -333,8 +379,8 @@ def test_qr_code_alone_is_enough_to_offer_a_method(env):
         sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
                           pdf_path=env["pdf"], methods=["zelle"], settings=config.load_settings())
 
-    images.store("zelle_qr", _png(env["tmp"] / "z.png"))
-    images.store("venmo_qr", _png(env["tmp"] / "v.png"))
+    images.store("zelle_qr", _qr(env["tmp"] / "z.png", ZELLE_LINK))
+    images.store("venmo_qr", _qr(env["tmp"] / "v.png", VENMO_LINK))
     assert config.enabled_methods() == ["zelle", "venmo"]
     sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
                       pdf_path=env["pdf"], settings=config.load_settings())
@@ -342,8 +388,7 @@ def test_qr_code_alone_is_enough_to_offer_a_method(env):
     text = msg.get_body(("plain",)).get_content()
     assert "Zelle: send $100.00 using the QR code below" in text
     assert "Venmo: send $100.00 using the QR code below" in text
-    html = msg.get_body(("html",)).get_content()
-    assert "cid:zelle-qr@plansender" in html
+    assert _scan_html_qr(msg.get_body(("html",)).get_content()) == [ZELLE_LINK, VENMO_LINK]
 
 
 def test_settings_accept_a_method_with_only_a_qr_code(env):
@@ -352,5 +397,5 @@ def test_settings_accept_a_method_with_only_a_qr_code(env):
 
     r = Api().save_settings({"zelle": {"enabled": True, "recipient": "", "name": ""}})
     assert not r["ok"] and "QR code" in r["error"]
-    images.store("zelle_qr", _png(env["tmp"] / "z.png"))
+    images.store("zelle_qr", _qr(env["tmp"] / "z.png", ZELLE_LINK))
     assert Api().save_settings({"zelle": {"enabled": True, "recipient": "", "name": ""}})["ok"]

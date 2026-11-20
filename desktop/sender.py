@@ -130,8 +130,7 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
             db.update_tx(tx_id, invoice_path=str(stored_invoice))
         tx = db.get_tx(tx_id)
         subject, text, html = mailer.invite(tx, settings)
-        mailer.send(from_email, to_email, subject, text, html, attachments=invite_attachments(tx), settings=settings,
-                    inline_images=invite_images(tx, settings))
+        mailer.send(from_email, to_email, subject, text, html, attachments=invite_attachments(tx), settings=settings)
     except Exception as exc:
         db.delete_tx(tx_id)
         shutil.rmtree(folder, ignore_errors=True)
@@ -151,10 +150,6 @@ def invite_attachments(tx):
         files.append((tx["invoice_path"], f"Invoice - {tx['title']}.pdf"))
     files.append((tx["preview_path"], f"PREVIEW - {tx['title']}.pdf"))
     return files
-
-
-def invite_images(tx, settings):
-    return [(cid, path) for _, cid, path in mailer.payment_images(tx, settings)]
 
 
 def mark_paid(tx_id, method, amount=None, allow_short=False, settings=None):
@@ -215,5 +210,5 @@ def resend(tx_id, settings=None):
         return
     subject, text, html = mailer.invite(tx, settings)
     mailer.send(tx["from_email"], tx["client_email"], subject, text, html,
-                attachments=invite_attachments(tx), settings=settings, inline_images=invite_images(tx, settings))
+                attachments=invite_attachments(tx), settings=settings)
     db.log(tx_id, f"Preview emailed again to {tx['client_email']}")

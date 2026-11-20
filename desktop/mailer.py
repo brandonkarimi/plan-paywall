@@ -13,8 +13,8 @@ class MailError(Exception):
     pass
 
 
-def send(from_email, to, subject, text, html=None, attachments=(), settings=None, inline_images=()):
-    """attachments: iterable of (path, filename). inline_images: (content_id, png_path) pairs shown inside the HTML."""
+def send(from_email, to, subject, text, html=None, attachments=(), settings=None):
+    """attachments: iterable of (path, filename)."""
     acct = config.account_for(from_email, settings)
     if not acct:
         raise MailError(f"{from_email} isn't set up yet. Add it in Settings → Email accounts.")
@@ -31,11 +31,6 @@ def send(from_email, to, subject, text, html=None, attachments=(), settings=None
     msg.set_content(text)
     if html:
         msg.add_alternative(html, subtype="html")
-        html_part = msg.get_payload()[-1]
-        for cid, path in inline_images:
-            # No filename or disposition: mail apps then show it only inside the message, never as an attachment.
-            html_part.add_related(Path(path).read_bytes(), maintype="image", subtype="png", cid=f"<{cid}>")
-            del html_part.get_payload()[-1]["Content-Disposition"]
     for path, filename in attachments:
         msg.add_attachment(Path(path).read_bytes(), maintype="application", subtype="pdf", filename=filename)
 
@@ -112,31 +107,62 @@ def _greeting(tx):
     return f"Hello {tx['client_name']}," if tx.get("client_name") else "Hello,"
 
 
-def payment_images(tx, settings=None):
-    """[(method, content_id, png_path)] for the QR codes to show in this transaction's preview email."""
-    out = []
-    for method in tx.get("methods") or []:
-        path = config.image_path(f"{method}_qr")
-        if path:
-            out.append((method, f"{method}-qr@plansender", path))
-    return out
+QR_SIZE = 240  # px, roughly; two cards side by side still fit the 600px message width
+QR_CARD = {
+    "zelle": ("Zelle", "#6d1ed4", "Scan in your banking app to pay"),
+    "venmo": ("Venmo", "#008cff", "Scan with the Venmo app to pay"),
+}
 
 
-QR_WIDTH = 260  # px in the email; two side by side still fit the 600px message width
+def qr_table(text, size=QR_SIZE):
+    """Draw a QR code as plain HTML table cells (no image), so mail apps show it as part of the message:
+    it can't be opened, downloaded or swiped through like a picture, yet scans exactly like the original."""
+    import segno
+
+    matrix = [list(row) for row in segno.make(text, error="m").matrix_iter(scale=1, border=3)]
+    cell = max(3, round(size / len(matrix)))
+    width = cell * len(matrix)
+    rows = []
+    for row in matrix:
+        tds, x = [], 0
+        while x < len(row):
+            run = 1
+            while x + run < len(row) and bool(row[x + run]) == bool(row[x]):
+                run += 1
+            tds.append(f"<td width={run * cell}" + (" bgcolor=#000>" if row[x] else ">") + "</td>")  # kept terse:
+            # a QR code is ~1,000 cells, and Gmail cuts off emails over ~100 KB
+            x += run
+        # One table per row: rows have different run lengths, so they can't share a column grid.
+        rows.append(f"<table cellpadding=0 cellspacing=0 border=0 width={width}><tr height={cell}>{''.join(tds)}</tr></table>")
+    return (f"<div style='width:{width}px;margin:0 auto;background:#ffffff;font-size:0;line-height:0'>"
+            + "".join(rows) + "</div>")
 
 
 def _qr_block(tx, settings):
-    images = payment_images(tx, settings)
-    if not images:
-        return None
+    from desktop import images
+
     cells = []
-    for method, cid, _ in images:
-        label = config.PAYMENT_METHODS[method]
-        img = (f"<img src='cid:{cid}' alt='{label} QR code' width='{QR_WIDTH}' style='display:block;width:{QR_WIDTH}px;"
-               f"max-width:100%;height:auto;border:1px solid #e5e7eb;border-radius:8px;pointer-events:none'>")
-        caption = "Scan with your banking app" if method == "zelle" else "Scan with the Venmo app"
-        cells.append(f"<td style='padding:0 18px 12px 0;vertical-align:top;text-align:center'>{img}"
-                     f"<div style='font-size:13px;color:#555;margin-top:6px'><b>{label}</b><br>{caption}</div></td>")
+    for method in tx.get("methods") or []:
+        text = images.qr_text(f"{method}_qr")
+        if not text:
+            continue
+        label, color, caption = QR_CARD[method]
+        if method == "zelle":
+            z = settings.get("zelle") or {}
+            who = " · ".join(x for x in (z.get("name"), z.get("recipient")) if x)
+        else:
+            user = (settings.get("venmo") or {}).get("username", "").strip().lstrip("@")
+            who = f"@{user}" if user else ""
+        cells.append(
+            "<td style='padding:0 14px 12px 0;vertical-align:top'>"
+            "<div style='border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px 12px;text-align:center'>"
+            f"<div style='font-size:20px;font-weight:700;color:{color};margin-bottom:10px'>{label}</div>"
+            + qr_table(text)
+            + f"<div style='font-size:13px;color:#444;margin-top:10px'>{caption}</div>"
+            + (f"<div style='font-size:13px;font-weight:600;color:#16191d'>{escape(who)}</div>" if who else "")
+            + "</div></td>")
+    if not cells:
+        return None
     return {"html": "<table role='presentation' cellpadding='0' cellspacing='0' style='margin:2px 0 18px'><tr>"
                     + "".join(cells) + "</tr></table>"}
 

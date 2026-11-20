@@ -1,4 +1,6 @@
-"""Import the pictures used in client emails (payment QR codes) and on previews (watermark logo)."""
+"""Import the pictures used in client emails (payment QR codes) and on previews (watermark logo).
+
+QR codes are read when they're chosen; emails redraw them from that text rather than attaching the picture."""
 import base64
 from pathlib import Path
 
@@ -29,6 +31,10 @@ def store(slot, source) -> Path:
     if slot == "watermark":
         img = transparent_logo(img)
     else:
+        text = read_qr(img)
+        if not text:
+            raise ImageError("Couldn't find a QR code in that picture. Use a clear screenshot of your QR code.")
+        (config.images_dir() / f"{slot}.txt").write_text(text, encoding="utf-8")
         img = img.convert("RGBA")
         flat = Image.new("RGB", img.size, "white")
         flat.paste(img, mask=img.getchannel("A"))
@@ -44,6 +50,30 @@ def remove(slot):
     path = config.image_path(slot)
     if path:
         path.unlink()
+    (config.images_dir() / f"{slot}.txt").unlink(missing_ok=True)
+
+
+def read_qr(img) -> str:
+    """The text (usually a payment link) inside the QR code in ``img``, or "" if there isn't one."""
+    import zxingcpp
+
+    for result in zxingcpp.read_barcodes(img.convert("RGB")):
+        if result.format == zxingcpp.BarcodeFormat.QRCode and result.text:
+            return result.text
+    return ""
+
+
+def qr_text(slot) -> str:
+    """The saved QR code text for ``slot`` ("" if none). Reads it from the picture if it wasn't saved yet."""
+    if not config.image_path(slot):
+        return ""
+    saved = config.images_dir() / f"{slot}.txt"
+    if saved.is_file():
+        return saved.read_text(encoding="utf-8").strip()
+    text = read_qr(Image.open(config.image_path(slot)))
+    if text:
+        saved.write_text(text, encoding="utf-8")
+    return text
 
 
 def thumbnails():
