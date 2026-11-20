@@ -10,7 +10,7 @@ The client receives a watermarked preview and payment instructions (Zelle or Ven
 2. **Client pays:** by Zelle or Venmo, using the reference code in the email.
 3. **Mark as paid:** once the payment arrives, click *Mark as paid*. The final PDF is sent.
 
-Every transaction is logged and can be exported to CSV.
+Every transaction is logged. The log can be searched, exported to CSV, or cleared.
 
 ## Install
 

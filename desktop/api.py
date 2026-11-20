@@ -2,6 +2,7 @@
 import csv
 import logging
 import os
+import shutil
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -160,6 +161,17 @@ class Api:
         path = Path(result[0] if isinstance(result, (list, tuple)) else result)
         write_csv(path)
         return _ok(path=str(path))
+
+    def reset_log(self, confirm):
+        """Delete every transaction, its log and its stored PDFs. Requires typing DELETE."""
+        if (confirm or "").strip().upper() != "DELETE":
+            return _err("Type DELETE to confirm.")
+        removed = db.delete_all()
+        files = config.data_dir() / "files"
+        shutil.rmtree(files, ignore_errors=True)
+        files.mkdir(parents=True, exist_ok=True)
+        log.info("Transaction log reset (%s removed)", removed)
+        return _ok(message=f"Cleared {removed} transaction{'s' if removed != 1 else ''} and their stored files.")
 
     # ------------------------------------------------------------ settings
     def save_settings(self, payload):

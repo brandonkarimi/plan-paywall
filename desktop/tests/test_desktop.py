@@ -197,3 +197,24 @@ def test_old_database_upgrades_in_place(env):
     db.init()
     (old,) = db.list_txs()
     assert old["methods"] == [] and old["ref_code"] == "" and old["paid_method"] == ""
+
+
+def test_reset_log_requires_confirmation_and_never_reuses_refs(env):
+    from desktop.api import Api
+
+    a = Api()
+    t1 = send(env)
+    send(env, to_email="b@example.com")
+    folder = config.data_dir() / "files" / str(t1)
+    assert folder.is_dir()
+
+    assert not a.reset_log("delete it")["ok"]
+    assert len(db.list_txs()) == 2
+
+    r = a.reset_log("DELETE")
+    assert r["ok"] and "Cleared 2 transactions" in r["message"]
+    assert db.list_txs() == [] and db.activity(t1) == [] and not folder.exists()
+    assert a.transactions()["totals"]["sent"] == 0
+
+    t3 = send(env, to_email="c@example.com")
+    assert t3 == 3 and db.get_tx(t3)["ref_code"] == "PLN-3"  # numbering continues; PLN-1 is never reused

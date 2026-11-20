@@ -133,6 +133,16 @@ def delete_tx(tx_id):
         c.execute("DELETE FROM transactions WHERE id = ?", [tx_id])
 
 
+def delete_all() -> int:
+    """Remove every transaction and its activity. Ids keep counting up (AUTOINCREMENT), so reference codes
+    like PLN-7 are never reused for a different project. Returns how many transactions were removed."""
+    with connect() as c:
+        count = c.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        c.execute("DELETE FROM activity")
+        c.execute("DELETE FROM transactions")
+    return count
+
+
 def log(tx_id, text):
     with connect() as c:
         c.execute("INSERT INTO activity (tx_id, ts, text) VALUES (?, ?, ?)", [tx_id, now(), text[:500]])

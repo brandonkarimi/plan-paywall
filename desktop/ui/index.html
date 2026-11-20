@@ -104,7 +104,15 @@
   .stats b { display: block; font-size: 1.25rem; }
   .stats span { color: var(--muted); font-size: .8rem; }
   .stats .money b { color: var(--money); }
-  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .search { flex: 1; min-width: 220px; position: relative; display: flex; align-items: center; }
+  .search svg { position: absolute; left: 11px; color: var(--muted); pointer-events: none; }
+  .search input { padding-left: 34px; }
+  .btn.ghost.danger { color: var(--err); }
+  .btn.ghost.danger:hover { background: var(--err-soft); }
+  .btn.danger-solid { background: var(--err); }
+  .resetbox { border: 1px solid var(--err); background: var(--err-soft); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+  .resetbox input { width: auto; background: var(--card); }
   details.tx { border-top: 1px solid var(--line); }
   details.tx summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 1fr auto auto; gap: 14px;
     align-items: center; padding: 12px 6px; border-radius: 10px; }
@@ -209,11 +217,25 @@
         <div class="money"><b id="t-collected">$0.00</b><span>collected</span></div>
         <div><b id="t-waiting">$0.00</b><span>waiting on payment</span></div>
       </div>
+      <p class="small muted" id="t-methods" style="margin:0 0 10px"></p>
       <div class="toolbar">
-        <span class="small muted" id="t-methods"></span>
-        <span style="flex:1"></span>
+        <div class="search">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="tx-search" type="search" placeholder="Search project, client, ref (PLN-3), amount, status…" autocomplete="off">
+        </div>
         <button class="btn ghost" id="csv-btn">Export log (CSV)</button>
+        <button class="btn ghost danger" id="reset-btn">Clear log…</button>
       </div>
+      <div class="resetbox hidden" id="reset-panel">
+        <b>Delete every transaction?</b>
+        <p class="small" style="margin:4px 0 10px">This removes the whole log and the stored PDFs for every project, paid or not. Unpaid projects can't be marked paid afterwards. It can't be undone, so export the CSV first if you want a copy.</p>
+        <div class="actions">
+          <input id="reset-confirm" type="text" placeholder="Type DELETE" autocomplete="off" style="width:160px">
+          <button class="btn danger-solid" id="reset-go">Delete everything</button>
+          <button class="btn ghost" id="reset-cancel">Cancel</button>
+        </div>
+      </div>
+      <div class="small muted hidden" id="tx-count" style="margin:2px 0 6px"></div>
       <div id="tx-list"></div>
     </div>
   </section>
@@ -425,6 +447,7 @@ $("send-btn").addEventListener("click", async () => {
   chosen = null; $("pick").classList.remove("has"); $("pick-name").textContent = "Choose the plan PDF…";
   $("pick-info").textContent = "Click to browse"; $("share-wrap").classList.add("hidden");
   // Jump to the log with the new send opened, so it's obvious where it went.
+  $("tx-search").value = "";
   await showTab("tx");
   const row = document.querySelector(`details.tx[data-id="${r.tx_id}"]`);
   if (row) { row.open = true; row.classList.add("new"); }
@@ -432,16 +455,34 @@ $("send-btn").addEventListener("click", async () => {
 });
 
 // ------------------------------------------------------------ transactions
+let txItems = [];
+function matches(t, words) {
+  if (!words.length) return true;
+  const hay = [t.title, t.client_name, t.client_email, t.from_email, t.ref_code, t.price, t.label,
+    t.pay_by.join(" "), ...t.activity.map(a => a.text)].join(" ").toLowerCase();
+  return words.every(w => hay.includes(w));
+}
 async function loadTransactions() {
   const data = await api.transactions();
   $("t-sent").textContent = data.totals.sent; $("t-paid").textContent = data.totals.paid;
   $("t-collected").textContent = data.totals.collected; $("t-waiting").textContent = data.totals.waiting;
   $("t-methods").textContent = data.totals.by_method.length ? "By method: " + data.totals.by_method.join(" · ") : "";
+  txItems = data.items;
+  $("reset-btn").classList.toggle("hidden", !txItems.length);
+  renderTransactions();
+}
+function renderTransactions() {
+  const words = $("tx-search").value.toLowerCase().split(/\s+/).filter(Boolean);
+  const shown = txItems.filter(t => matches(t, words));
+  const count = $("tx-count");
+  count.classList.toggle("hidden", !words.length);
+  count.textContent = `Showing ${shown.length} of ${txItems.length} transaction${txItems.length === 1 ? "" : "s"}`;
   const open = new Set([...document.querySelectorAll("details.tx[open]")].map(d => d.dataset.id));
   const list = $("tx-list"); list.replaceChildren();
-  if (!data.items.length) list.append(el("div", { class: "empty" }, el("img", { src: "icon.png", alt: "" }),
+  if (!txItems.length) list.append(el("div", { class: "empty" }, el("img", { src: "icon.png", alt: "" }),
     "Nothing sent yet. Everything you send, and every update on it, is saved here."));
-  for (const t of data.items) {
+  else if (!shown.length) list.append(el("div", { class: "empty" }, `No transactions match “${$("tx-search").value.trim()}”.`));
+  for (const t of shown) {
     const paid = t.status === "paid";
     const actions = el("div", { class: "actions" });
     let markForm = null;
@@ -481,10 +522,21 @@ async function loadTransactions() {
         el("ol", { class: "timeline" }, t.activity.map(a => el("li", { class: a.text.startsWith("Paid") ? "paid" : "" }, el("time", {}, fmt(a.ts)), a.text))),
         el("div", { class: "sub", style: "margin-bottom:10px" }, `Ref ${t.ref_code || "-"} · pay by ${t.pay_by.join(", ") || "-"} · from ${t.from_email} · ${t.pages} pages · fingerprint ${t.sha256.slice(0, 12)}…${t.share_link ? " · delivered by link" : ""}`),
         markForm, actions));
-    if (open.has(String(t.id))) d.open = true;
+    if (open.has(String(t.id)) || (words.length && shown.length <= 3)) d.open = true;
     list.append(d);
   }
 }
+$("tx-search").addEventListener("input", renderTransactions);
+$("reset-btn").addEventListener("click", () => {
+  $("reset-panel").classList.toggle("hidden"); $("reset-confirm").value = ""; $("reset-confirm").focus();
+});
+$("reset-cancel").addEventListener("click", () => $("reset-panel").classList.add("hidden"));
+$("reset-go").addEventListener("click", async () => {
+  const r = await api.reset_log($("reset-confirm").value);
+  if (!r.ok) return flash(r.error, "err");
+  $("reset-panel").classList.add("hidden"); $("tx-search").value = "";
+  await loadTransactions(); flash(r.message);
+});
 $("csv-btn").addEventListener("click", async () => {
   const r = await api.export_csv(); if (r.ok && r.path) flash(`Saved ${r.path}`);
 });
