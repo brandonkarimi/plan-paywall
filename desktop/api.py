@@ -170,10 +170,6 @@ class Api:
             webbrowser.open(url)
         return _ok()
 
-    def open_data_folder(self):
-        os.startfile(config.data_dir())  # noqa: S606
-        return _ok()
-
     def export_csv(self):
         import webview
 

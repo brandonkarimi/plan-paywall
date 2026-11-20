@@ -307,7 +307,6 @@
     <div class="footer-actions">
       <button class="btn" id="settings-save">Finish setup</button>
       <button class="btn ghost hidden" id="settings-back">Back</button>
-      <span class="small muted">Data is stored in <a href="#" id="data-dir"></a></span>
     </div>
   </section>
 </div>
@@ -388,7 +387,6 @@ async function loadState() {
   const sig = s.signature || {};
   $("g-name").value = sig.name || ""; $("g-firm").value = sig.firm || "";
   $("g-license").value = sig.license || ""; $("g-phone").value = sig.phone || "";
-  $("data-dir").textContent = state.data_dir;
   const ps = $("a-preset"); if (!ps.options.length) {
     Object.entries(presets).forEach(([k, p]) => ps.append(el("option", { value: k }, p.label)));
     ps.addEventListener("change", presetChanged); presetChanged();
@@ -405,7 +403,6 @@ function presetChanged() {
   const custom = $("a-preset").value === "custom";
   $("a-custom-host").classList.toggle("hidden", !custom); $("a-custom-port").classList.toggle("hidden", !custom);
 }
-$("data-dir").addEventListener("click", (e) => { e.preventDefault(); api.open_data_folder(); });
 $("a-save").addEventListener("click", async () => {
   const r = await api.save_account({ preset: $("a-preset").value, email: $("a-email").value, name: $("a-name").value,
     password: $("a-pass").value, host: $("a-host").value, port: $("a-port").value, security: $("a-sec").value });
