@@ -16,7 +16,7 @@ Every transaction is logged. The log can be searched, exported to CSV, or cleare
 
 Download `PlanSender.zip`, unzip it, and run `PlanSender.exe`.
 
-On first launch, open **Settings** and add:
+On first launch, a short setup screen asks for:
 - your Zelle and/or Venmo details
 - the email account to send from (for Gmail, use an [app password](https://myaccount.google.com/apppasswords))
 
