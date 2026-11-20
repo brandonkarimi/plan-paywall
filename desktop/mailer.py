@@ -1,7 +1,7 @@
 """Send email through the engineer's own account (SMTP), plus the message templates."""
 import smtplib
 import ssl
-from email.message import EmailMessage
+from email.message import EmailMessage, MIMEPart
 from email.utils import formataddr, make_msgid
 from html import escape
 from pathlib import Path
@@ -28,14 +28,25 @@ def send(from_email, to, subject, text, html=None, attachments=(), settings=None
     msg["To"] = to
     msg["Reply-To"] = acct["email"]
     msg["Message-ID"] = make_msgid(domain=acct["email"].split("@")[-1])
-    msg.set_content(text)
-    if html:
-        msg.add_alternative(html, subtype="html")
-        logo = config.image_path("signature_logo")
-        if logo and f"cid:{SIGNATURE_LOGO_CID}" in html:  # the signature logo travels inside the message
-            msg.get_payload()[1].add_related(logo.read_bytes(), maintype="image", subtype="png",
-                                             cid=f"<{SIGNATURE_LOGO_CID}>", filename="logo.png",
-                                             disposition="inline")
+    logo = config.image_path("signature_logo")
+    if html and logo and f"cid:{SIGNATURE_LOGO_CID}" in html:
+        # The signature logo travels inside the message, laid out the way Gmail does it
+        # (mixed > related > [text/html versions, logo]) and with no file name, so mail apps show it in the
+        # signature only and don't list it next to the PDFs as an attachment.
+        body = MIMEPart()
+        body.set_content(text)
+        body.add_alternative(html, subtype="html")
+        image = MIMEPart()
+        image.set_content(logo.read_bytes(), maintype="image", subtype="png", disposition="inline",
+                          cid=f"<{SIGNATURE_LOGO_CID}>")
+        image["X-Attachment-Id"] = SIGNATURE_LOGO_CID
+        msg["MIME-Version"] = "1.0"
+        msg["Content-Type"] = "multipart/related"
+        msg.set_payload([body, image])
+    else:
+        msg.set_content(text)
+        if html:
+            msg.add_alternative(html, subtype="html")
     for path, filename in attachments:
         msg.add_attachment(Path(path).read_bytes(), maintype="application", subtype="pdf", filename=filename)
 

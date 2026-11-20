@@ -212,7 +212,12 @@ def test_every_email_carries_the_signature_with_inline_logo(env):
         assert f"cid:{mailer.SIGNATURE_LOGO_CID}" in html and "tel:5551234567" in html and "mailto:pat@acmecivil.test" in html
         inline = [p for p in msg.walk() if p.get("Content-ID") == f"<{mailer.SIGNATURE_LOGO_CID}>"]
         assert len(inline) == 1 and inline[0].get_content_type() == "image/png"
-        assert all(not n.endswith(".png") for n, _ in attachments(msg))  # the logo isn't a separate attachment
+        assert inline[0].get_content_disposition() == "inline" and inline[0].get_filename() is None
+        assert all(not (n or "").endswith(".png") for n, _ in attachments(msg))  # the logo isn't a separate attachment
+        # Gmail's own layout: mixed > related > (alternative, logo), then the PDFs.
+        related = msg.get_payload()[0] if msg.get_content_type() == "multipart/mixed" else msg
+        assert related.get_content_type() == "multipart/related"
+        assert [p.get_content_type() for p in related.get_payload()] == ["multipart/alternative", "image/png"]
 
     images.remove("signature_logo")
     env["smtp"].sent.clear()
