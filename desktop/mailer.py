@@ -31,14 +31,14 @@ def send(from_email, to, subject, text, html=None, attachments=(), settings=None
     logo = config.image_path("signature_logo")
     if html and logo and f"cid:{SIGNATURE_LOGO_CID}" in html:
         # The signature logo travels inside the message, laid out the way Gmail does it
-        # (mixed > related > [text/html versions, logo]) and with no file name, so mail apps show it in the
-        # signature only and don't list it next to the PDFs as an attachment.
+        # (mixed > related > [text/html versions, logo]). Gmail still lists it in the inbox next to the PDFs,
+        # so it's named logo.png rather than showing up as "noname".
         body = MIMEPart()
         body.set_content(text)
         body.add_alternative(html, subtype="html")
         image = MIMEPart()
         image.set_content(logo.read_bytes(), maintype="image", subtype="png", disposition="inline",
-                          cid=f"<{SIGNATURE_LOGO_CID}>")
+                          cid=f"<{SIGNATURE_LOGO_CID}>", filename=LOGO_FILENAME)
         image["X-Attachment-Id"] = SIGNATURE_LOGO_CID
         msg["MIME-Version"] = "1.0"
         msg["Content-Type"] = "multipart/related"
@@ -78,6 +78,7 @@ def money(cents) -> str:
 
 
 SIGNATURE_LOGO_CID = "plansender-signature-logo"
+LOGO_FILENAME = "logo.png"
 SIG_LINK = "color:#1a56db;text-decoration:underline"
 
 
