@@ -16,6 +16,10 @@ $py = ".venv\Scripts\python.exe"
     --exclude-module reportlab --exclude-module pytest --exclude-module tkinter
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
-Start-Sleep -Seconds 2  # let antivirus finish scanning new files before zipping
-Compress-Archive -Path dist\PlanSender -DestinationPath dist\PlanSender.zip -Force
+# Antivirus may still be scanning the new files; retry the zip a few times.
+foreach ($try in 1..5) {
+    Start-Sleep -Seconds (2 * $try)
+    try { Compress-Archive -Path dist\PlanSender -DestinationPath dist\PlanSender.zip -Force; break }
+    catch { if ($try -eq 5) { throw } }
+}
 Write-Host "Built dist\PlanSender\PlanSender.exe and dist\PlanSender.zip"

@@ -174,6 +174,18 @@ def test_api_accounts_totals_and_csv(env, tmp_path):
     assert not a.save_settings({"zelle": {"enabled": True, "recipient": ""}})["ok"]
 
 
+def test_page_cache_is_cleared_but_other_webview_data_kept(tmp_path):
+    from desktop.app import clear_page_cache
+    default = tmp_path / "EBWebView" / "Default"
+    for name in ("Cache", "Code Cache", "Local Storage"):
+        (default / name).mkdir(parents=True)
+        (default / name / "f").write_text("x")
+    clear_page_cache(tmp_path)
+    assert not (default / "Cache").exists() and not (default / "Code Cache").exists()
+    assert (default / "Local Storage" / "f").exists()
+    clear_page_cache(tmp_path / "missing")   # no error when nothing is there yet
+
+
 def test_theme_defaults_to_light_and_is_remembered(env):
     from desktop.api import Api
     a = Api()
