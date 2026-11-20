@@ -58,7 +58,8 @@
     border-radius: 10px; cursor: pointer; display: grid; place-items: center; }
   .gear:hover, .gear.active, .theme-btn:hover { background: rgba(255, 255, 255, .25); }
 
-  .wrap { max-width: 1240px; margin: 0 auto; padding: 20px 20px 40px; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 20px 20px 24px; }
+  #tab-send .card { margin-bottom: 0; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; margin-bottom: 16px;
     box-shadow: var(--shadow); }
   .card h2 { font-size: 1.05rem; margin: 0 0 14px; display: flex; align-items: center; gap: 10px; }
@@ -422,14 +423,43 @@ function fmt(ts) {
 }
 
 // ------------------------------------------------------------ fit to window
-// The Send page fits in about 1040 x 720. Bigger windows (up to full screen) scale everything up
-// so the page fills the space instead of leaving wide empty margins; smaller windows keep normal size.
+// Bigger windows (up to full screen) scale everything up so the page fills the space; smaller windows keep
+// normal size. The scale comes from the Send page's real height, and any height left over on the Send page
+// goes to the two PDF boxes, so there's no empty band at the bottom.
+let sendHeight = 720;  // natural height of the Send page at normal size; measured whenever it's showing
 function fitToWindow() {
-  const scale = Math.min(window.innerWidth / 1040, window.innerHeight / 720);
-  document.body.style.zoom = Math.max(1, Math.min(scale, 1.6)).toFixed(3);
+  const body = document.body, picks = [$("pick"), $("inv-pick")];
+  const onSend = !$("tab-send").classList.contains("hidden");
+  let pickHeight = 0;
+  if (onSend) {
+    body.style.zoom = 1; picks.forEach(p => p.style.minHeight = "");
+    sendHeight = Math.ceil(document.querySelector(".wrap").getBoundingClientRect().bottom);
+    pickHeight = Math.max(...picks.map(p => p.getBoundingClientRect().height));
+  }
+  const zoom = Math.max(1, Math.min(window.innerWidth / 1040, window.innerHeight / sendHeight, 1.6));
+  body.style.zoom = zoom.toFixed(3);
+  if (onSend) {
+    const spare = Math.floor(window.innerHeight / zoom - sendHeight) - 2;
+    const extra = Math.min(Math.max(spare, 0), 240);
+    if (extra > 0) picks.forEach(p => p.style.minHeight = Math.round(pickHeight + extra) + "px");
+    // Text can wrap onto fewer lines once scaled up, freeing a little more room: hand that to the boxes too.
+    // Browsers differ on whether measurements inside a zoomed page are already scaled; work it out from <body>.
+    const scaled = body.getBoundingClientRect().width / body.clientWidth;  // ≈ zoom if already scaled, ≈ 1 if not
+    const bottom = document.querySelector(".wrap").getBoundingClientRect().bottom * zoom / scaled;
+    const more = Math.floor((window.innerHeight - bottom) / zoom) - 2;
+    if (more > 0 && extra + more <= 240) picks.forEach(p => p.style.minHeight = Math.round(pickHeight + extra + more) + "px");
+  }
 }
-fitToWindow();
-window.addEventListener("resize", fitToWindow);
+let fitQueued = false;
+function refit() {
+  if (fitQueued) return;
+  fitQueued = true;
+  requestAnimationFrame(() => { fitQueued = false; fitToWindow(); });
+}
+window.addEventListener("resize", refit);
+new MutationObserver(refit).observe($("tab-send"), { subtree: true, attributes: true, attributeFilter: ["class"], childList: true });
+new MutationObserver(refit).observe($("flash"), { childList: true });
+refit();
 
 // ------------------------------------------------------------ theme
 // Saved in settings; also cached in localStorage so the window opens in the right theme without a flash.
