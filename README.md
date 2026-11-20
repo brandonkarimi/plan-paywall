@@ -14,7 +14,7 @@ Every transaction is logged. The log can be searched, exported to CSV, or cleare
 
 ## Install
 
-Download `PlanSender.zip`, unzip it, and run `PlanSender.exe`.
+**[Download PlanSender.zip](https://github.com/brandonkarimi/plan-paywall/releases/latest/download/PlanSender.zip)** (Windows 10/11), unzip the whole folder, and run `PlanSender.exe`.
 
 On first launch, a short setup screen asks for:
 - your Zelle and/or Venmo details
