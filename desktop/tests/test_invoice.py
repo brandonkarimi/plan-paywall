@@ -64,7 +64,7 @@ def test_invoice_with_price(env, invoice):
 
 
 def test_price_still_required_without_invoice(env):
-    with pytest.raises(sender.SendError, match="price like"):
+    with pytest.raises(sender.SendError, match="Enter the price, or attach an invoice"):
         send(env, price="")
 
 

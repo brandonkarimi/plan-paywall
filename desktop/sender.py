@@ -84,6 +84,8 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
             raise SendError("The invoice PDF is too large to email (over 6 MB).")
     if invoice is not None and not str(price or "").strip():
         price_cents = 0  # amount is on the invoice
+    elif not str(price or "").strip():
+        raise SendError("Enter the price, or attach an invoice to fill it in.")
     else:
         price_cents = _price_cents(price)
     src = Path(pdf_path or "")

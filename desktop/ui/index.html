@@ -180,8 +180,8 @@
           <input id="f-name" type="text">
         </div>
         <div>
-          <label for="f-price">Price (USD) <span class="opt hidden" id="price-opt">(optional with an invoice)</span></label>
-          <input id="f-price" type="text" inputmode="decimal" placeholder="1500.00">
+          <label for="f-price">Price (USD) <span class="opt">(optional if you attach an invoice)</span></label>
+          <input id="f-price" type="text" inputmode="decimal" placeholder="1500.00, or filled in from the invoice">
           <div class="sub hidden" id="price-hint" style="margin-top:4px"></div>
         </div>
         <div class="full">
@@ -455,7 +455,6 @@ async function pickInvoice() {
   $("inv-pick").classList.add("has"); $("inv-clear").classList.remove("hidden");
   $("inv-name").textContent = r.name;
   $("inv-info").textContent = r.amount ? `Total found: $${Number(r.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "Attached";
-  $("price-opt").classList.remove("hidden");
   if (r.amount && (!$("f-price").value.trim() || priceFromInvoice)) {
     $("f-price").value = r.amount; priceFromInvoice = true;
     priceHint("Filled in from the invoice. Check it's right.");
@@ -467,7 +466,6 @@ function clearInvoice() {
   invoice = null;
   $("inv-pick").classList.remove("has"); $("inv-clear").classList.add("hidden");
   $("inv-name").textContent = "Attach an invoice…"; $("inv-info").textContent = "Sent to the client as-is";
-  $("price-opt").classList.add("hidden");
   if (priceFromInvoice) { $("f-price").value = ""; priceFromInvoice = false; }
   priceHint("");
 }
