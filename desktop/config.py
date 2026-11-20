@@ -31,10 +31,7 @@ DEFAULT_SETTINGS = {
     "accounts": [],          # [{"email", "name", "preset", "host", "port", "security"}]; passwords in keyring
     "default_from": "",
     # Email signature; "name" includes credentials as the engineer wants them shown (e.g. "Pat Lee, PE").
-    # "logo_url" is a link to the logo online (like Gmail's own signatures): carrying the picture inside the
-    # email makes Gmail list it as an attachment.
-    "signature": {"name": "", "firm": "", "license": "", "phone": "", "email": "", "street": "", "city": "",
-                  "logo_url": ""},
+    "signature": {"name": "", "firm": "", "license": "", "phone": "", "email": "", "street": "", "city": ""},
     "zelle": {"enabled": False, "recipient": "", "name": ""},   # email/phone clients send to + name shown in Zelle
     "venmo": {"enabled": False, "username": ""},
     "preview_dpi": 100,
@@ -65,6 +62,7 @@ IMAGES = {
     "zelle_qr": "Zelle QR code",
     "venmo_qr": "Venmo QR code",
     "watermark": "Watermark logo",
+    "signature_logo": "Signature logo",
 }
 
 

@@ -239,11 +239,7 @@ class Api:
     def save_settings(self, payload):
         settings = config.load_settings()
         if "signature" in payload:
-            sig = {k: str(v).strip() for k, v in payload["signature"].items()}
-            if sig.get("logo_url") and not mailer.logo_url_ok(sig["logo_url"]):
-                return _err("The logo web address should be a link starting with https://. "
-                            "Right-click the logo online and choose “Copy image address”.")
-            settings["signature"] = {**settings["signature"], **sig}
+            settings["signature"] = {k: str(v).strip() for k, v in payload["signature"].items()}
         for field in ("zelle", "venmo"):
             if field in payload:
                 clean = {k: (v.strip() if isinstance(v, str) else bool(v)) for k, v in payload[field].items()}
@@ -260,8 +256,9 @@ class Api:
 
     def signature_preview(self, signature):
         """The email signature as clients will see it, for the live preview in Settings."""
+        logo = images.thumbnails().get("signature_logo") or None
         sig = {k: str(v) for k, v in (signature or {}).items()}
-        return mailer.signature_html({"signature": sig})
+        return mailer.signature_html({"signature": sig}, logo)
 
     def set_theme(self, theme):
         if theme not in ("light", "dark"):
