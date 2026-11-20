@@ -55,6 +55,26 @@ def files_dir(tx_id) -> Path:
     return path
 
 
+# Pictures the engineer adds in Settings. Kept on this PC only (never bundled into the app or the repo).
+IMAGES = {
+    "zelle_qr": "Zelle QR code",
+    "venmo_qr": "Venmo QR code",
+    "watermark": "Watermark logo",
+}
+
+
+def images_dir() -> Path:
+    path = data_dir() / "images"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def image_path(slot):
+    """The stored PNG for ``slot`` if one has been added, else None."""
+    path = images_dir() / f"{slot}.png"
+    return path if slot in IMAGES and path.is_file() else None
+
+
 def log_path() -> Path:
     return data_dir() / "plansender.log"
 

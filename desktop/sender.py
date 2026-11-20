@@ -37,8 +37,10 @@ WATERMARK_TEXT = "PREVIEW"
 def make_preview(final_path: Path, out_path: Path, text: str, settings) -> Path:
     """Build the preview, stepping the resolution down if it would be too big to email."""
     data = final_path.read_bytes()
+    logo = config.image_path("watermark")  # the engineer's logo replaces the PREVIEW text when one is set
     for dpi in sorted({settings.get("preview_dpi", 100), 75, 60, 45}, reverse=True):
-        preview = build_preview(data, text, dpi=dpi, jpeg_quality=65, seal_box=settings.get("seal_box") or None)
+        preview = build_preview(data, text, dpi=dpi, jpeg_quality=65, seal_box=settings.get("seal_box") or None,
+                                logo=logo)
         if len(preview) <= PREVIEW_EMAIL_LIMIT:
             break
     out_path.write_bytes(preview)
@@ -128,7 +130,8 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
             db.update_tx(tx_id, invoice_path=str(stored_invoice))
         tx = db.get_tx(tx_id)
         subject, text, html = mailer.invite(tx, settings)
-        mailer.send(from_email, to_email, subject, text, html, attachments=invite_attachments(tx), settings=settings)
+        mailer.send(from_email, to_email, subject, text, html, attachments=invite_attachments(tx), settings=settings,
+                    inline_images=invite_images(tx, settings))
     except Exception as exc:
         db.delete_tx(tx_id)
         shutil.rmtree(folder, ignore_errors=True)
@@ -148,6 +151,10 @@ def invite_attachments(tx):
         files.append((tx["invoice_path"], f"Invoice - {tx['title']}.pdf"))
     files.append((tx["preview_path"], f"PREVIEW - {tx['title']}.pdf"))
     return files
+
+
+def invite_images(tx, settings):
+    return [(cid, path) for _, cid, path in mailer.payment_images(tx, settings)]
 
 
 def mark_paid(tx_id, method, amount=None, allow_short=False, settings=None):
@@ -208,5 +215,5 @@ def resend(tx_id, settings=None):
         return
     subject, text, html = mailer.invite(tx, settings)
     mailer.send(tx["from_email"], tx["client_email"], subject, text, html,
-                attachments=invite_attachments(tx), settings=settings)
+                attachments=invite_attachments(tx), settings=settings, inline_images=invite_images(tx, settings))
     db.log(tx_id, f"Preview emailed again to {tx['client_email']}")

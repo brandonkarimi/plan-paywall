@@ -10,7 +10,7 @@ from functools import lru_cache
 
 import img2pdf
 import pypdfium2 as pdfium
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 MAX_PIXELS = 40_000_000  # cap per page so a giant sheet can't exhaust memory
 
@@ -34,23 +34,59 @@ def _parse_box(box):
     return left, top, right, bottom
 
 
-def watermark_page(img, text, seal_box=None):
-    """Return an RGB copy of ``img`` with a tiled diagonal watermark and an optional seal cover."""
+def transparent_logo(img):
+    """Return an RGBA copy of a logo with its white background made transparent and trimmed away.
+
+    Fades by whiteness rather than cutting at a threshold, so anti-aliased edges stay smooth.
+    """
+    img = img.convert("RGBA")
+    r, g, b, a = img.split()
+    lightest = ImageChops.darker(ImageChops.darker(r, g), b)  # min(r, g, b): 255 only for pure white/grey
+    fade = lightest.point(lambda v: max(0, min(255, (250 - v) * 4)))  # 250+ (paper white) is fully clear
+    img.putalpha(ImageChops.multiply(a, fade))
+    box = img.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
+    return img.crop(box) if box else img
+
+
+LOGO_OPACITY = 0.30
+
+
+def _logo_tile(logo, width):
+    """Scale the logo to ``width`` px and fade it to watermark strength."""
+    height = max(1, round(logo.height * width / logo.width))
+    tile = logo.resize((width, height), Image.LANCZOS)
+    tile.putalpha(tile.getchannel("A").point(lambda v: round(v * LOGO_OPACITY)))
+    return tile
+
+
+def watermark_page(img, text, seal_box=None, logo=None):
+    """Return an RGB copy of ``img`` with a tiled diagonal watermark and an optional seal cover.
+
+    ``logo`` (an RGBA image with a transparent background) is tiled instead of ``text`` when given.
+    """
     img = img.convert("RGB")
     w, h = img.size
     short = min(w, h)
 
     # 1. Tiled diagonal watermark over the whole sheet.
-    font = _font(max(14, short // 28))
     diag = int(math.hypot(w, h)) + 10
     layer = Image.new("RGBA", (diag, diag), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-    tw, th = draw.textbbox((0, 0), text, font=font)[2:]
-    step_x, step_y = tw + short // 10, th * 4
-    for row, y in enumerate(range(0, diag, step_y)):
-        offset = (row % 2) * (step_x // 2)
-        for x in range(-step_x, diag, step_x):
-            draw.text((x + offset, y), text, font=font, fill=(200, 30, 30, 80))
+    if logo is not None:
+        tile = _logo_tile(logo, max(40, short // 4))
+        step_x, step_y = tile.width + short // 12, tile.height + short // 10
+        for row, y in enumerate(range(0, diag, step_y)):
+            offset = (row % 2) * (step_x // 2)
+            for x in range(-step_x, diag, step_x):
+                layer.paste(tile, (x + offset, y))  # tiles never overlap, so a plain paste is enough
+    else:
+        font = _font(max(14, short // 28))
+        draw = ImageDraw.Draw(layer)
+        tw, th = draw.textbbox((0, 0), text, font=font)[2:]
+        step_x, step_y = tw + short // 10, th * 4
+        for row, y in enumerate(range(0, diag, step_y)):
+            offset = (row % 2) * (step_x // 2)
+            for x in range(-step_x, diag, step_x):
+                draw.text((x + offset, y), text, font=font, fill=(200, 30, 30, 80))
     layer = layer.rotate(32, resample=Image.BICUBIC)
     left, top = (diag - w) // 2, (diag - h) // 2
     layer = layer.crop((left, top, left + w, top + h))
@@ -74,8 +110,13 @@ def watermark_page(img, text, seal_box=None):
     return out.convert("RGB")
 
 
-def build_preview(source, watermark_text, dpi=100, jpeg_quality=70, seal_box=None):
-    """Render ``source`` (path, bytes, or binary file object) into a watermarked image-only PDF; return bytes."""
+def build_preview(source, watermark_text, dpi=100, jpeg_quality=70, seal_box=None, logo=None):
+    """Render ``source`` (path, bytes, or binary file object) into a watermarked image-only PDF; return bytes.
+
+    ``logo``: optional path or RGBA image of a transparent logo, tiled in place of ``watermark_text``.
+    """
+    if logo is not None and not isinstance(logo, Image.Image):
+        logo = Image.open(logo).convert("RGBA")
     if hasattr(source, "read"):
         source = source.read()
     pdf = pdfium.PdfDocument(source)
@@ -90,7 +131,7 @@ def build_preview(source, watermark_text, dpi=100, jpeg_quality=70, seal_box=Non
             bitmap = page.render(scale=scale)
             img = bitmap.to_pil()
             page.close()
-            img = watermark_page(img, watermark_text, seal_box)
+            img = watermark_page(img, watermark_text, seal_box, logo)
             buf = io.BytesIO()
             eff_dpi = round(scale * 72, 3)
             # Embedding the DPI makes img2pdf keep the true sheet size (e.g. 24x36 in).

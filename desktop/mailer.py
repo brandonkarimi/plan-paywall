@@ -13,8 +13,8 @@ class MailError(Exception):
     pass
 
 
-def send(from_email, to, subject, text, html=None, attachments=(), settings=None):
-    """attachments: iterable of (path, filename)."""
+def send(from_email, to, subject, text, html=None, attachments=(), settings=None, inline_images=()):
+    """attachments: iterable of (path, filename). inline_images: (content_id, png_path) pairs shown inside the HTML."""
     acct = config.account_for(from_email, settings)
     if not acct:
         raise MailError(f"{from_email} isn't set up yet. Add it in Settings → Email accounts.")
@@ -31,6 +31,10 @@ def send(from_email, to, subject, text, html=None, attachments=(), settings=None
     msg.set_content(text)
     if html:
         msg.add_alternative(html, subtype="html")
+        html_part = msg.get_payload()[-1]
+        for cid, path in inline_images:
+            html_part.add_related(Path(path).read_bytes(), maintype="image", subtype="png", cid=f"<{cid}>",
+                                  disposition="inline", filename=Path(path).name)
     for path, filename in attachments:
         msg.add_attachment(Path(path).read_bytes(), maintype="application", subtype="pdf", filename=filename)
 
@@ -79,6 +83,9 @@ def _wrap(paragraphs, settings, button=None):
     """Build (text, html) from paragraphs; a paragraph may be a list of lines."""
     text_parts, html_parts = [], []
     for p in paragraphs:
+        if isinstance(p, dict):  # a ready-made HTML block (e.g. QR codes) with no plain-text version
+            html_parts.append(p["html"])
+            continue
         lines = p if isinstance(p, list) else [p]
         text_parts.append("\n".join(lines))
         html_parts.append("<p style='margin:0 0 14px'>" + "<br>".join(escape(x) for x in lines) + "</p>")
@@ -102,6 +109,36 @@ def _wrap(paragraphs, settings, button=None):
 
 def _greeting(tx):
     return f"Hello {tx['client_name']}," if tx.get("client_name") else "Hello,"
+
+
+def payment_images(tx, settings=None):
+    """[(method, content_id, png_path)] for the QR codes to show in this transaction's preview email."""
+    out = []
+    for method in tx.get("methods") or []:
+        path = config.image_path(f"{method}_qr")
+        if path:
+            out.append((method, f"{method}-qr@plansender", path))
+    return out
+
+
+def _qr_block(tx, settings):
+    images = payment_images(tx, settings)
+    if not images:
+        return None
+    cells = []
+    for method, cid, _ in images:
+        label = config.PAYMENT_METHODS[method]
+        img = (f"<img src='cid:{cid}' alt='{label} QR code' width='180' style='display:block;width:180px;height:auto;"
+               f"border:1px solid #e5e7eb;border-radius:8px'>")
+        caption = "Scan with your banking app" if method == "zelle" else "Scan with the Venmo app"
+        user = (settings.get("venmo") or {}).get("username", "").strip().lstrip("@")
+        if method == "venmo" and user:
+            img = f"<a href='https://venmo.com/u/{escape(user)}'>{img}</a>"
+            caption += " or tap the code"
+        cells.append(f"<td style='padding:0 18px 0 0;vertical-align:top;text-align:center'>{img}"
+                     f"<div style='font-size:13px;color:#555;margin-top:6px'><b>{label}</b><br>{caption}</div></td>")
+    return {"html": "<table role='presentation' cellpadding='0' cellspacing='0' style='margin:2px 0 18px'><tr>"
+                    + "".join(cells) + "</tr></table>"}
 
 
 def invite(tx, settings):
@@ -129,6 +166,9 @@ def invite(tx, settings):
         paragraphs.append(["You can pay with Zelle or Venmo, whichever you prefer:"] + [f"  • {o}" for o in options])
     else:
         paragraphs += options
+    qr = _qr_block(tx, settings)
+    if qr:
+        paragraphs.append(qr)
     paragraphs.append("Once payment is received, the full PDF will be emailed to you.")
     text, html = _wrap(paragraphs, settings)
     return f"Preview: {tx['title']}", text, html

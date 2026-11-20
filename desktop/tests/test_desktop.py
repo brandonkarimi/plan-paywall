@@ -246,3 +246,75 @@ def test_both_methods_say_whichever_you_prefer(env):
     send(env, methods=["venmo"], to_email="b@example.com")
     single = body(env["smtp"].sent[1])
     assert "whichever you prefer" not in single and "Venmo: send $1,500.00 to @AcmeCivil-Eng" in single
+
+
+def _png(path, color=(30, 60, 110), size=(60, 40), bg="white"):
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB", size, bg)
+    ImageDraw.Draw(img).rectangle([10, 10, 40, 30], fill=color)
+    img.save(path)
+    return path
+
+
+def test_qr_codes_are_embedded_in_the_preview_email(env):
+    from desktop import images
+
+    images.store("zelle_qr", _png(env["tmp"] / "z.png"))
+    images.store("venmo_qr", _png(env["tmp"] / "v.jpg"))
+    sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
+                      pdf_path=env["pdf"], settings=config.load_settings())
+    msg = env["smtp"].sent[-1]
+    html = msg.get_body(("html",)).get_content()
+    assert "cid:zelle-qr@plansender" in html and "cid:venmo-qr@plansender" in html
+    assert "https://venmo.com/u/AcmeCivil-Eng" in html
+    cids = {p["Content-ID"] for p in msg.walk() if p.get_content_type() == "image/png"}
+    assert cids == {"<zelle-qr@plansender>", "<venmo-qr@plansender>"}
+    # Only the PDFs are listed as attachments; the QR codes sit inside the message.
+    assert [a.get_filename() for a in msg.iter_attachments() if a.get_content_type() == "application/pdf"]
+
+
+def test_only_the_chosen_methods_qr_code_is_shown(env):
+    from desktop import images
+
+    images.store("zelle_qr", _png(env["tmp"] / "z.png"))
+    images.store("venmo_qr", _png(env["tmp"] / "v.png"))
+    sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
+                      pdf_path=env["pdf"], methods=["venmo"], settings=config.load_settings())
+    html = env["smtp"].sent[-1].get_body(("html",)).get_content()
+    assert "venmo-qr" in html and "zelle-qr" not in html
+
+
+def test_no_qr_codes_without_pictures(env):
+    sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
+                      pdf_path=env["pdf"], settings=config.load_settings())
+    msg = env["smtp"].sent[-1]
+    assert "cid:" not in msg.get_body(("html",)).get_content()
+    assert not [p for p in msg.walk() if p.get_content_maintype() == "image"]
+
+
+def test_watermark_logo_background_is_removed_and_used_on_previews(env):
+    from PIL import Image
+
+    from desktop import images
+    from plancore.preview import build_preview
+
+    stored = images.store("watermark", _png(env["tmp"] / "logo.png", size=(80, 60)))
+    logo = Image.open(stored)
+    assert logo.mode == "RGBA" and logo.size == (31, 21)  # white border trimmed off
+    assert logo.getpixel((15, 10))[3] == 255
+    from desktop.tests.conftest import make_pdf
+
+    plain = build_preview(make_pdf(pages=1), "PREVIEW", dpi=30)
+    branded = build_preview(make_pdf(pages=1), "PREVIEW", dpi=30, logo=stored)
+    assert branded != plain and branded[:5] == b"%PDF-"
+
+
+def test_bad_picture_is_rejected(env):
+    from desktop import images
+
+    bad = env["tmp"] / "notes.png"
+    bad.write_text("not an image")
+    with pytest.raises(images.ImageError):
+        images.store("zelle_qr", bad)
+    assert config.image_path("zelle_qr") is None

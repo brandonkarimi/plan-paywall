@@ -8,7 +8,7 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
-from desktop import config, db, mailer, sender
+from desktop import config, db, images, mailer, sender
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +90,7 @@ class Api:
         settings = public_settings()
         return {"settings": settings, "presets": config.SMTP_PRESETS, "payment_methods": config.PAYMENT_METHODS,
                 "manual_methods": config.MANUAL_METHODS, "data_dir": str(config.data_dir()),
+                "images": images.thumbnails(),
                 "setup_needed": not (settings["enabled_methods"] and settings["accounts"])}
 
     def transactions(self):
@@ -240,6 +241,24 @@ class Api:
                                 f"or switch {field.title()} off.")
                 settings[field] = {**settings[field], **clean}
         config.save_settings(settings)
+        return _ok(state=self.state())
+
+    def choose_image(self, slot):
+        """Pick a picture (QR code or watermark logo) and copy it into the app."""
+        import webview
+
+        result = self._window.create_file_dialog(
+            webview.FileDialog.OPEN, file_types=("Pictures (*.png;*.jpg;*.jpeg)", "All files (*.*)"))
+        if not result:
+            return _ok(state=None)
+        try:
+            images.store(slot, result[0] if isinstance(result, (list, tuple)) else result)
+        except images.ImageError as exc:
+            return _err(exc)
+        return _ok(state=self.state())
+
+    def remove_image(self, slot):
+        images.remove(slot)
         return _ok(state=self.state())
 
     def save_account(self, acct):

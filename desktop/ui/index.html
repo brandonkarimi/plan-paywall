@@ -99,6 +99,10 @@
     border: 1px solid var(--line); border-radius: 10px; cursor: pointer; background: var(--field); }
   .methods label:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
   .method-fields { margin: 8px 0 18px 26px; }
+  .picture { display: flex; align-items: center; gap: 14px; }
+  .picture .thumb { width: 72px; height: 72px; flex: none; border: 1px solid var(--line); border-radius: 10px;
+    background: #fff center / contain no-repeat; display: grid; place-items: center; color: var(--muted); font-size: .75rem; }
+  .picture .thumb.wide { width: 120px; }
 
   /* ---------- transactions ---------- */
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
@@ -284,10 +288,12 @@
       <div class="grid method-fields" id="m-zelle-fields">
         <div><label>Zelle email or phone <span class="opt">(where clients send money)</span></label><input id="m-zelle-to" type="text" placeholder="you@example.com or 555-123-4567"></div>
         <div><label>Name shown in Zelle <span class="opt">(so clients know it's you)</span></label><input id="m-zelle-name" type="text" placeholder="Pat Lee"></div>
+        <div class="full" data-picture="zelle_qr" data-hint="Shown in the email so clients can scan to pay."></div>
       </div>
       <label class="check"><input type="checkbox" id="m-venmo">Venmo</label>
       <div class="grid method-fields" id="m-venmo-fields">
         <div><label>Venmo username</label><input id="m-venmo-user" type="text" placeholder="@your-username"></div>
+        <div class="full" data-picture="venmo_qr" data-hint="Shown in the email so clients can scan to pay."></div>
       </div>
       <p class="small muted" style="margin:6px 0 0">When a payment arrives in your bank or Venmo app, click <b>Mark as paid</b> in Transactions and the final PDF is emailed straight away. Only mark it paid once you see the money, not from a screenshot.</p>
     </div>
@@ -320,6 +326,11 @@
         <div><label>PE license # <span class="opt">(optional)</span></label><input id="g-license" type="text"></div>
         <div><label>Phone <span class="opt">(optional)</span></label><input id="g-phone" type="text"></div>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Preview watermark <span class="opt small">(optional)</span></h2>
+      <div data-picture="watermark" data-wide="1" data-hint="Your logo is repeated across every preview sheet instead of the word PREVIEW. A white background is removed automatically."></div>
     </div>
 
     <div class="footer-actions">
@@ -433,6 +444,7 @@ async function loadState() {
       el("button", { class: "btn ghost", onclick: async () => {
         if (!await ask({ title: "Remove email account?", message: `${a.email} will no longer be available as a From address. Its saved password is deleted too.`, ok: "Remove", tone: "danger", icon: "!" })) return;
         await api.remove_account(a.email); loadState(); } }, "Remove")))));
+  renderPictures();
   const sig = s.signature || {};
   $("g-name").value = sig.name || ""; $("g-firm").value = sig.firm || "";
   $("g-license").value = sig.license || ""; $("g-phone").value = sig.phone || "";
@@ -440,6 +452,22 @@ async function loadState() {
     Object.entries(presets).forEach(([k, p]) => ps.append(el("option", { value: k }, p.label)));
     ps.addEventListener("change", presetChanged); presetChanged();
   }
+}
+// Pictures (QR codes, watermark logo) are saved as soon as they're chosen.
+function renderPictures() {
+  document.querySelectorAll("[data-picture]").forEach(box => {
+    const slot = box.dataset.picture, src = state.images[slot];
+    const thumb = el("div", { class: "thumb" + (box.dataset.wide ? " wide" : "") }, src ? "" : "None");
+    if (src) thumb.style.backgroundImage = `url(${src})`;
+    const done = (r) => { if (!r.ok) return flash(r.error, "err"); if (r.state) { state = r.state; renderPictures(); } };
+    box.replaceChildren(el("label", {}, { zelle_qr: "Zelle QR code", venmo_qr: "Venmo QR code", watermark: "Watermark logo" }[slot],
+        el("span", { class: "opt" }, " (optional)")),
+      el("div", { class: "picture" }, thumb, el("div", {},
+        el("div", { class: "actions" },
+          el("button", { class: "btn ghost", onclick: async () => done(await api.choose_image(slot)) }, src ? "Change picture…" : "Choose picture…"),
+          src ? el("button", { class: "btn ghost danger", onclick: async () => done(await api.remove_image(slot)) }, "Remove") : null),
+        el("div", { class: "sub", style: "margin-top:6px" }, box.dataset.hint))));
+  });
 }
 function toggleMethodFields() {
   $("m-zelle-fields").classList.toggle("hidden", !$("m-zelle").checked);
