@@ -75,16 +75,23 @@ def _signature(settings):
     return lines
 
 
+def _para_html(lines):
+    return "<p style='margin:0 0 14px'>" + "<br>".join(escape(x) for x in lines) + "</p>"
+
+
 def _wrap(paragraphs, settings, button=None):
     """Build (text, html) from paragraphs; a paragraph may be a list of lines."""
     text_parts, html_parts = [], []
     for p in paragraphs:
-        if isinstance(p, dict):  # a ready-made HTML block (e.g. QR codes) with no plain-text version
-            html_parts.append(p["html"])
+        if isinstance(p, dict):  # separate plain-text and HTML versions (e.g. QR codes only exist in HTML)
+            if p.get("text"):
+                text_parts.append("\n".join(p["text"]))
+            if p.get("html"):
+                html_parts.append(p["html"] if isinstance(p["html"], str) else _para_html(p["html"]))
             continue
         lines = p if isinstance(p, list) else [p]
         text_parts.append("\n".join(lines))
-        html_parts.append("<p style='margin:0 0 14px'>" + "<br>".join(escape(x) for x in lines) + "</p>")
+        html_parts.append(_para_html(lines))
         buttons = button if isinstance(button, list) else [button] if button else []
         for b in buttons:
             if p is b["after"]:
@@ -107,7 +114,7 @@ def _greeting(tx):
     return f"Hello {tx['client_name']}," if tx.get("client_name") else "Hello,"
 
 
-QR_SIZE = 240  # px, roughly; two cards side by side still fit the 600px message width
+QR_SIZE = 200  # px, roughly; two cards side by side still fit the 600px message width
 QR_CARD = {
     "zelle": ("Zelle", "#6d1ed4", "Scan in your banking app to pay"),
     "venmo": ("Venmo", "#008cff", "Scan with the Venmo app to pay"),
@@ -164,7 +171,7 @@ def _zelle_contact(qr_link):
     return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}" if digits.isdigit() and len(digits) == 10 else token
 
 
-CARD_WIDTH = 270  # px; both cards share it, and two side by side fit the 600px message width
+CARD_WIDTH = 236  # px; both cards share it, and two side by side fit the 600px message width
 
 
 def _qr_block(tx, settings):
@@ -182,7 +189,7 @@ def _qr_block(tx, settings):
             who = f"@{user}" if user else ""
         cards.append((method, who, _qr_matrix(text)))
     if not cards:
-        return None
+        return None, set()
     modules = max(len(m) for _, _, m in cards) + 6  # same size for every code
     cells = []
     for i, (method, who, matrix) in enumerate(cards):
@@ -196,8 +203,9 @@ def _qr_block(tx, settings):
             f"<div style='font-size:15px;font-weight:600;color:#16191d;margin:2px 0 10px'>{escape(who) or '&nbsp;'}</div>"
             + qr_table(matrix, modules=modules)
             + f"<div style='font-size:13px;color:#444;margin-top:10px'>{caption}</div></td>")
-    return {"html": "<table role='presentation' cellpadding=0 cellspacing=0 style='margin:2px 0 18px;"
-                    "border-collapse:separate'><tr>" + "".join(cells) + "</tr></table>"}
+    html = ("<table role='presentation' cellpadding=0 cellspacing=0 style='margin:2px 0 18px;"
+            "border-collapse:separate'><tr>" + "".join(cells) + "</tr></table>")
+    return {"html": html}, {method for method, _, _ in cards}
 
 
 def invite(tx, settings):
@@ -212,26 +220,27 @@ def invite(tx, settings):
     else:
         intro = f"Here is a preview of your plans for {tx['title']}. To receive the full PDF, please pay {price}."
     paragraphs = [_greeting(tx), intro]
-    options = []
+    options = {}
     if "zelle" in methods:
         z = settings.get("zelle") or {}
         name = f" ({z['name']})" if z.get("name") else ""
         from desktop import images
 
         to = z.get("recipient") or _zelle_contact(images.qr_text("zelle_qr"))
-        if to:
-            options.append(f"Zelle: send {pay} to {to}{name}")
-        else:
-            options.append(f"Zelle: send {pay} using the QR code below")
+        options["zelle"] = f"Zelle: send {pay} to {to}{name}" if to else f"Zelle: send {pay} using the QR code below"
     if "venmo" in methods:
         user = (settings.get("venmo") or {}).get("username", "").strip().lstrip("@")
-        options.append(f"Venmo: send {pay} to @{user}" if user else f"Venmo: send {pay} using the QR code below")
-    if len(options) > 1:
-        # Make it obvious the client only needs to use one of them.
-        paragraphs.append(["You can pay with Zelle or Venmo, whichever you prefer:"] + [f"  • {o}" for o in options])
-    else:
-        paragraphs += options
-    qr = _qr_block(tx, settings)
+        options["venmo"] = f"Venmo: send {pay} to @{user}" if user else f"Venmo: send {pay} using the QR code below"
+    qr, shown = _qr_block(tx, settings)
+
+    def how_to_pay(lines):
+        if len(options) > 1:  # make it obvious the client only needs to use one of them
+            return ["You can pay with Zelle or Venmo, whichever you prefer:"] + [f"  • {o}" for o in lines]
+        return lines or [f"You can pay with {config.PAYMENT_METHODS[m]}:" for m in options]
+
+    # A QR card already shows who to pay, so its line is left out of the email; text-only mail apps still get it.
+    paragraphs.append({"text": how_to_pay(list(options.values())),
+                       "html": how_to_pay([o for m, o in options.items() if m not in shown])})
     if qr:
         paragraphs.append(qr)
     paragraphs.append("Once payment is received, the full PDF will be emailed to you.")

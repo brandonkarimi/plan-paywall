@@ -436,3 +436,17 @@ def test_cards_show_contact_and_are_the_same_size(env):
     assert "Zelle: send $100.00 to 714-932-0775" in msg.get_body(("plain",)).get_content()
     assert len(set(re.findall(r"<div style='width:(\d+)px;margin:0 auto", html))) == 1  # QR codes match
     assert len(set(re.findall(r"<td width=(\d+) valign=top", html))) == 1  # so do the cards
+
+
+def test_qr_cards_replace_the_pay_to_lines_in_the_email(env):
+    from desktop import images
+
+    images.store("zelle_qr", _qr(env["tmp"] / "z.png", ZELLE_LINK))
+    sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="93.50",
+                      pdf_path=env["pdf"], settings=config.load_settings())
+    msg = env["smtp"].sent[-1]
+    html, text = msg.get_body(("html",)).get_content(), msg.get_body(("plain",)).get_content()
+    assert "whichever you prefer" in html
+    assert "Zelle: send" not in html  # the Zelle card shows it instead
+    assert "Venmo: send $93.50 to @AcmeCivil-Eng" in html  # no Venmo QR code, so the line stays
+    assert "Zelle: send $93.50 to pat@acmecivil.test" in text and "Venmo: send" in text  # text-only mail apps
