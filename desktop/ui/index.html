@@ -24,8 +24,19 @@
     --shadow: 0 1px 2px rgba(0, 0, 0, .3);
     color-scheme: dark;
   }
-  body, .card, input, select, .topbar { transition: background-color .2s, border-color .2s, color .2s; }
+  :root.fade body, :root.fade .card, :root.fade input, :root.fade select, :root.fade .topbar { transition: background-color .2s, border-color .2s, color .2s; }
   * { box-sizing: border-box; }
+
+  /* Slim, rounded scroll bars that match the theme: no arrows, no grey track. */
+  :root { --scroll-thumb: #c3d3ee; --scroll-thumb-hover: #8fb0e6; }
+  :root[data-theme="dark"] { --scroll-thumb: #2c3d6b; --scroll-thumb-hover: #3f5591; }
+  ::-webkit-scrollbar { width: 12px; height: 12px; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 999px;
+    border: 3px solid transparent; background-clip: padding-box; min-height: 40px; }
+  ::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover); }
+  ::-webkit-scrollbar-thumb:active { background-color: var(--brand); }
+  ::-webkit-scrollbar-button { display: none; height: 0; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
   a { color: var(--brand); }
 
@@ -432,6 +443,7 @@ function applyTheme(theme) {
 try { applyTheme(localStorage.getItem("theme") || "light"); } catch (e) { applyTheme("light"); }
 $("theme-btn").addEventListener("click", () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.classList.add("fade");  // smooth fade only when switching by hand
   applyTheme(next);
   if (api) api.set_theme(next);
 });
