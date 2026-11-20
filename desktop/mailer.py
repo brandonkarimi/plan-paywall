@@ -116,13 +116,19 @@ def invite(tx, settings):
     else:
         intro = f"Here is a preview of your plans for {tx['title']}. To receive the full PDF, please pay {price}."
     paragraphs = [_greeting(tx), intro]
+    options = []
     if "zelle" in methods:
         z = settings.get("zelle") or {}
         name = f" ({z['name']})" if z.get("name") else ""
-        paragraphs.append(f"Zelle: send {pay} to {z.get('recipient', '')}{name}")
+        options.append(f"Zelle: send {pay} to {z.get('recipient', '')}{name}")
     if "venmo" in methods:
         user = (settings.get("venmo") or {}).get("username", "").strip().lstrip("@")
-        paragraphs.append(f"Venmo: send {pay} to @{user}")
+        options.append(f"Venmo: send {pay} to @{user}")
+    if len(options) > 1:
+        # Make it obvious the client only needs to use one of them.
+        paragraphs.append(["You can pay with Zelle or Venmo, whichever you prefer:"] + [f"  • {o}" for o in options])
+    else:
+        paragraphs += options
     paragraphs.append("Once payment is received, the full PDF will be emailed to you.")
     text, html = _wrap(paragraphs, settings)
     return f"Preview: {tx['title']}", text, html

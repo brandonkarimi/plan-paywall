@@ -236,3 +236,13 @@ def test_old_log_entries_are_shown_in_plain_wording():
     assert friendly("Paid $1,500.00 via Zelle (confirmed by you)") == "Marked as paid: $1,500.00 by Zelle"
     assert friendly("Final plans re-sent to a@b.com") == "Full plans emailed again to a@b.com"
     assert friendly("Something new") == "Something new"
+
+
+def test_both_methods_say_whichever_you_prefer(env):
+    send(env)  # Zelle and Venmo both enabled
+    text = body(env["smtp"].sent[0])
+    assert "You can pay with Zelle or Venmo, whichever you prefer:\n  • Zelle: send $1,500.00" in text
+    assert "  • Venmo: send $1,500.00 to @AcmeCivil-Eng" in text
+    send(env, methods=["venmo"], to_email="b@example.com")
+    single = body(env["smtp"].sent[1])
+    assert "whichever you prefer" not in single and "Venmo: send $1,500.00 to @AcmeCivil-Eng" in single
