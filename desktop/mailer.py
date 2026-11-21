@@ -14,7 +14,7 @@ class MailError(Exception):
 
 
 def send(from_email, to, subject, text, html=None, attachments=(), settings=None):
-    """attachments: iterable of (path, filename)."""
+    """attachments: iterable of (path or bytes, filename). Bytes are attached exactly as given."""
     acct = config.account_for(from_email, settings)
     if not acct:
         raise MailError(f"{from_email} isn't set up yet. Add it in Settings → Email accounts.")
@@ -48,7 +48,8 @@ def send(from_email, to, subject, text, html=None, attachments=(), settings=None
         if html:
             msg.add_alternative(html, subtype="html")
     for path, filename in attachments:
-        msg.add_attachment(Path(path).read_bytes(), maintype="application", subtype="pdf", filename=filename)
+        data = path if isinstance(path, bytes) else Path(path).read_bytes()
+        msg.add_attachment(data, maintype="application", subtype="pdf", filename=filename)
 
     host, port, security = acct["host"], int(acct["port"]), acct.get("security", "starttls")
     context = ssl.create_default_context()

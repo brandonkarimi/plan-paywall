@@ -57,6 +57,23 @@ def files_dir(tx_id) -> Path:
     return path
 
 
+def remove_tree(path) -> None:
+    """Delete a stored-files folder, including the read-only final PDFs (Windows won't delete those as-is)."""
+    import os
+    import shutil
+    import stat
+
+    def clear_readonly(func, target, _exc):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    if Path(path).exists():
+        try:
+            shutil.rmtree(path, onerror=clear_readonly)
+        except OSError:
+            pass
+
+
 # Pictures the engineer adds in Settings. Kept on this PC only (never bundled into the app or the repo).
 IMAGES = {
     "zelle_qr": "Zelle QR code",

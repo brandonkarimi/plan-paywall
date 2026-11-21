@@ -1,7 +1,10 @@
 """Send plans behind a pay wall: the client gets a watermarked preview and payment instructions; the final PDF
 stays on this PC until the engineer marks the transaction paid."""
+import hashlib
+import os
 import re
 import shutil
+import stat
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -122,6 +125,9 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
     try:
         final = folder / "final.pdf"
         shutil.copy2(src, final)
+        if hashlib.sha256(final.read_bytes()).hexdigest() != info["sha256"]:
+            raise SendError("The plan PDF changed while it was being copied (is it still being saved or synced?). "
+                            "Close it in other programs and send again.")
         preview = make_preview(final, folder / "preview.pdf", WATERMARK_TEXT, settings)
         db.update_tx(tx_id, final_path=str(final), preview_path=str(preview))
         if invoice is not None:
@@ -133,11 +139,12 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
         mailer.send(from_email, to_email, subject, text, html, attachments=invite_attachments(tx), settings=settings)
     except Exception as exc:
         db.delete_tx(tx_id)
-        shutil.rmtree(folder, ignore_errors=True)
+        config.remove_tree(folder)
         if isinstance(exc, SendError):
             raise
         raise SendError(str(exc)) from exc
 
+    os.chmod(final, stat.S_IREAD)  # the stored original is read-only so a PDF viewer can't save over it
     db.update_tx(tx_id, status="sent", sent_at=db.now())
     db.log(tx_id, f"Preview{' and invoice' if invoice is not None else ''} sent to {to_email}")
     return tx_id
@@ -185,7 +192,11 @@ def deliver(tx, settings=None):
         if not tx["share_link"]:
             if not Path(tx["final_path"]).is_file():
                 raise mailer.MailError("The final PDF is missing from the app's files folder.")
-            attachments = [(tx["final_path"], f"{tx['title']}.pdf")]
+            data = Path(tx["final_path"]).read_bytes()
+            if tx["sha256"] and hashlib.sha256(data).hexdigest() != tx["sha256"]:
+                raise mailer.MailError("The stored final PDF doesn't match the original you sent the preview of "
+                                       "(it was changed after sending), so it was not emailed.")
+            attachments = [(data, f"{tx['title']}.pdf")]  # exactly the bytes just checked
         subject, text, html = mailer.files(tx, settings)
         mailer.send(tx["from_email"], tx["client_email"], subject, text, html, attachments, settings=settings)
     except Exception as exc:

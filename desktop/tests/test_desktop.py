@@ -1,6 +1,7 @@
 import hashlib
 import smtplib
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -534,3 +535,46 @@ def test_qr_cards_replace_the_pay_to_lines_in_the_email(env):
     assert "Zelle: send" not in html  # the Zelle card shows it instead
     assert "Venmo: send $93.50 to @AcmeCivil-Eng" in html  # no Venmo QR code, so the line stays
     assert "Zelle: send $93.50 to pat@acmecivil.test" in text and "Venmo: send" in text  # text-only mail apps
+
+
+# ------------------------------------------------------------------ the final PDF is never altered
+def test_stored_final_is_read_only_and_identical(env):
+    import os
+    tx = db.get_tx(send(env))
+    final = Path(tx["final_path"])
+    assert final.read_bytes() == env["pdf"].read_bytes()
+    assert not os.access(final, os.W_OK)
+
+
+def test_changed_final_is_not_delivered(env):
+    import os
+    import stat
+    tx_id = send(env)
+    final = Path(db.get_tx(tx_id)["final_path"])
+    os.chmod(final, stat.S_IWRITE)
+    final.write_bytes(final.read_bytes() + b"\n% edited")
+    env["smtp"].sent.clear()
+    assert sender.mark_paid(tx_id, "Zelle") is False
+    assert env["smtp"].sent == []
+    assert "doesn't match the original" in db.get_tx(tx_id)["delivery_error"]
+
+
+def test_source_changing_during_copy_is_refused(env, monkeypatch):
+    import shutil
+    real_copy = shutil.copy2
+
+    def copy_then_change(src, dst, *a, **kw):
+        real_copy(src, dst, *a, **kw)
+        Path(dst).write_bytes(Path(dst).read_bytes() + b"\n% half-saved")
+    monkeypatch.setattr(sender.shutil, "copy2", copy_then_change)
+    with pytest.raises(sender.SendError, match="changed while it was being copied"):
+        send(env)
+    assert db.list_txs(["draft", "sent"]) == []
+
+
+def test_delete_removes_read_only_files(env):
+    from desktop.api import Api
+    tx_id = send(env)
+    folder = Path(db.get_tx(tx_id)["final_path"]).parent
+    Api().delete_tx(tx_id)
+    assert not folder.exists()

@@ -3,7 +3,6 @@ import csv
 import logging
 import os
 import re
-import shutil
 import webbrowser
 from datetime import datetime
 from pathlib import Path
@@ -220,7 +219,7 @@ class Api:
         if not tx:
             return _err("That transaction no longer exists.")
         db.delete_tx(tx_id)
-        shutil.rmtree(config.data_dir() / "files" / str(int(tx_id)), ignore_errors=True)
+        config.remove_tree(config.data_dir() / "files" / str(int(tx_id)))
         log.info("Transaction %s deleted", tx_id)
         return _ok(message=f"Deleted “{tx['title']}” and its stored files.")
 
@@ -230,7 +229,7 @@ class Api:
             return _err("Type DELETE to confirm.")
         removed = db.delete_all()
         files = config.data_dir() / "files"
-        shutil.rmtree(files, ignore_errors=True)
+        config.remove_tree(files)
         files.mkdir(parents=True, exist_ok=True)
         log.info("Transaction log reset (%s removed)", removed)
         return _ok(message=f"Cleared {removed} transaction{'s' if removed != 1 else ''} and their stored files.")
