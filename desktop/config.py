@@ -27,6 +27,8 @@ SMTP_PRESETS = {
     "custom": {"label": "Other (custom SMTP)", "host": "", "port": 587, "security": "starttls", "help": ""},
 }
 
+# Standard wording of the two emails. The preview one can be replaced per send on the Send page.
+# {client}, {project} and {amount} are filled in; blank ones drop out ("Hello {client}," → "Hello,").
 EMAIL_DEFAULTS = {
     "preview_subject": "Preview: {project}",
     "preview_body": "Hello {client},\n\nHere is a preview of your plans for {project}. To receive the full PDF, please "
@@ -42,9 +44,6 @@ DEFAULT_SETTINGS = {
     "signature": {"name": "", "firm": "", "license": "", "phone": "", "email": "", "street": "", "city": ""},
     "zelle": {"enabled": False, "recipient": "", "name": ""},   # email/phone clients send to + name shown in Zelle
     "venmo": {"enabled": False, "username": ""},
-    # Wording of the two emails, editable in Settings (the preview one can also be changed per send).
-    # {client}, {project} and {amount} are filled in when sending; blank ones drop out ("Hello {client}," → "Hello,").
-    "emails": dict(EMAIL_DEFAULTS),
     "preview_dpi": 100,
     "seal_box": "",
     "theme": "light",        # "light" (blue and white) or "dark"

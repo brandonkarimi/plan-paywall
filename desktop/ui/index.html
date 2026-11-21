@@ -311,18 +311,17 @@
 
     <div class="card">
       <h2><span class="step">1</span>How clients pay you</h2>
-      <label class="check"><input type="checkbox" id="m-zelle">Zelle <span class="opt">&nbsp;(free, no fees)</span></label>
+      <label class="check"><input type="checkbox" id="m-zelle">Zelle</label>
       <div class="grid method-fields" id="m-zelle-fields">
-        <div><label>Zelle email or phone <span class="opt">(optional with a QR code)</span></label><input id="m-zelle-to" type="text" placeholder="you@example.com or 555-123-4567"></div>
-        <div><label>Name shown in Zelle <span class="opt">(optional)</span></label><input id="m-zelle-name" type="text" placeholder="Pat Lee"></div>
-        <div class="full" data-picture="zelle_qr" data-hint="Shown in the email so clients can scan to pay. Add this or the email/phone above."></div>
+        <div><label>Zelle email or phone</label><input id="m-zelle-to" type="text" placeholder="you@example.com or 555-123-4567"></div>
+        <div><label>Name shown in Zelle</label><input id="m-zelle-name" type="text" placeholder="Pat Lee"></div>
+        <div class="full" data-picture="zelle_qr"></div>
       </div>
       <label class="check"><input type="checkbox" id="m-venmo">Venmo</label>
       <div class="grid method-fields" id="m-venmo-fields">
-        <div><label>Venmo username <span class="opt">(optional with a QR code)</span></label><input id="m-venmo-user" type="text" placeholder="@your-username"></div>
-        <div class="full" data-picture="venmo_qr" data-hint="Shown in the email so clients can scan to pay. Add this or the username above."></div>
+        <div><label>Venmo username</label><input id="m-venmo-user" type="text" placeholder="@your-username"></div>
+        <div class="full" data-picture="venmo_qr"></div>
       </div>
-      <p class="small muted" style="margin:6px 0 0">When a payment arrives in your bank or Venmo app, click <b>Mark as paid</b> in Transactions and the final PDF is emailed straight away. Only mark it paid once you see the money, not from a screenshot.</p>
     </div>
 
     <div class="card">
@@ -333,7 +332,7 @@
         <div class="grid" style="margin-top:14px">
           <div><label>Email provider</label><select id="a-preset"></select></div>
           <div><label>Email address</label><input id="a-email" type="email"></div>
-          <div><label>Your name <span class="opt">(shown as the sender)</span></label><input id="a-name" type="text"></div>
+          <div><label>Your name</label><input id="a-name" type="text"></div>
           <div><label>Password / app password</label><input id="a-pass" type="password" autocomplete="off"></div>
           <div class="full small muted" id="a-help"></div>
           <div class="hidden" id="a-custom-host"><label>SMTP server</label><input id="a-host" type="text" placeholder="smtp.example.com"></div>
@@ -347,37 +346,23 @@
 
     <div class="card">
       <h2><span class="step">3</span>Your email signature</h2>
-      <p class="small muted" style="margin:-6px 0 14px">Added to the bottom of every email the app sends. Leave out anything you don't want shown.</p>
       <div class="grid">
         <div><label>Name and credentials</label><input id="g-name" type="text" placeholder="Pat Lee, MSCE, PE"></div>
-        <div><label>Firm <span class="opt">(optional)</span></label><input id="g-firm" type="text"></div>
-        <div><label>Cell phone <span class="opt">(optional)</span></label><input id="g-phone" type="text" placeholder="555-123-4567"></div>
-        <div><label>Email <span class="opt">(optional)</span></label><input id="g-email" type="email" placeholder="you@yourfirm.com"></div>
-        <div><label>PE license # <span class="opt">(optional)</span></label><input id="g-license" type="text"></div>
+        <div><label>Firm</label><input id="g-firm" type="text"></div>
+        <div><label>Cell phone</label><input id="g-phone" type="text" placeholder="555-123-4567"></div>
+        <div><label>Email</label><input id="g-email" type="email" placeholder="you@yourfirm.com"></div>
+        <div><label>PE license #</label><input id="g-license" type="text"></div>
         <div></div>
-        <div><label>Street address <span class="opt">(optional)</span></label><input id="g-street" type="text" placeholder="123 Main St #100"></div>
-        <div><label>City, state, ZIP <span class="opt">(optional)</span></label><input id="g-city" type="text" placeholder="Springfield CA 90000"></div>
-        <div class="full" data-picture="signature_logo" data-wide="1" data-hint="Shown on the left of your signature, like in Outlook."></div>
+        <div><label>Street address</label><input id="g-street" type="text" placeholder="123 Main St #100"></div>
+        <div><label>City, state, ZIP</label><input id="g-city" type="text" placeholder="Springfield CA 90000"></div>
+        <div class="full" data-picture="signature_logo" data-wide="1"></div>
         <div class="full"><label>Preview</label><div class="sig-preview" id="sig-preview"></div></div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Email messages <span class="opt small">(optional)</span></h2>
-      <p class="small muted" style="margin:-6px 0 14px">Write the emails in your own words. <b>{client}</b> (client name), <b>{project}</b> (project name) and <b>{amount}</b> (invoice total, if the app can read it) are filled in when sending; a blank one is left out. Your payment QR codes and signature are added automatically. Leave a box empty to go back to the original wording.</p>
-      <div class="grid">
-        <div class="full"><b class="small">Preview email</b> <span class="small muted">(sent with the watermarked preview; you can also change it on the Send page each time)</span></div>
-        <div class="full"><label for="e-preview-subject">Subject</label><input id="e-preview-subject" type="text" maxlength="300"></div>
-        <div class="full"><label for="e-preview-body">Message</label><textarea id="e-preview-body" rows="6"></textarea></div>
-        <div class="full" style="margin-top:6px"><b class="small">Plans email</b> <span class="small muted">(sent with the full plans after you mark a payment received)</span></div>
-        <div class="full"><label for="e-final-subject">Subject</label><input id="e-final-subject" type="text" maxlength="300"></div>
-        <div class="full"><label for="e-final-body">Message</label><textarea id="e-final-body" rows="4"></textarea></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Preview watermark <span class="opt small">(optional)</span></h2>
-      <div data-picture="watermark" data-wide="1" data-hint="Your logo is repeated across every preview sheet. A white background is removed automatically."></div>
+      <h2>Preview watermark</h2>
+      <div data-picture="watermark" data-wide="1"></div>
     </div>
 
     <div class="footer-actions">
@@ -513,7 +498,7 @@ function setupMode(firstRun) {
   $("nav").classList.toggle("hidden", firstRun);
   $("gear").classList.toggle("hidden", firstRun);
   $("setup-title").textContent = firstRun ? "Welcome to Plan Sender" : "Settings";
-  $("setup-sub").textContent = firstRun ? "Three quick steps and you're ready to send plans." : "Change how clients pay you, your email account, your signature or your email messages.";
+  $("setup-sub").textContent = firstRun ? "Three quick steps and you're ready to send plans." : "";
   $("settings-save").textContent = firstRun ? "Finish setup" : "Save changes";
   $("settings-back").classList.toggle("hidden", firstRun);
   if (firstRun && state && !state.settings.accounts.length) $("acct-add").open = true;
@@ -552,8 +537,6 @@ async function loadState() {
         if (!await ask({ title: "Remove email account?", message: `${a.email} will no longer be available as a From address. Its saved password is deleted too.`, ok: "Remove", tone: "danger", icon: "!" })) return;
         await api.remove_account(a.email); loadState(); } }, "Remove")))));
   renderPictures();
-  const em = s.emails || {};
-  EMAIL_FIELDS.forEach(([id, key]) => $(id).value = em[key] || "");
   const sig = s.signature || {};
   SIG_FIELDS.forEach(k => $("g-" + k).value = sig[k] || "");
   updateSigPreview();
@@ -569,17 +552,13 @@ function renderPictures() {
     const thumb = el("div", { class: "thumb" + (box.dataset.wide ? " wide" : "") }, src ? "" : "None");
     if (src) thumb.style.backgroundImage = `url(${src})`;
     const done = (r) => { if (!r.ok) return flash(r.error, "err"); if (r.state) { state = r.state; renderPictures(); updateSigPreview(); } };
-    box.replaceChildren(el("label", {}, { zelle_qr: "Zelle QR code", venmo_qr: "Venmo QR code", watermark: "Watermark logo", signature_logo: "Signature logo" }[slot],
-        el("span", { class: "opt" }, " (optional)")),
+    box.replaceChildren(el("label", {}, { zelle_qr: "Zelle QR code", venmo_qr: "Venmo QR code", watermark: "Watermark logo", signature_logo: "Signature logo" }[slot]),
       el("div", { class: "picture" }, thumb, el("div", {},
         el("div", { class: "actions" },
           el("button", { class: "btn ghost", onclick: async () => done(await api.choose_image(slot)) }, src ? "Change picture…" : "Choose picture…"),
-          src ? el("button", { class: "btn ghost danger", onclick: async () => done(await api.remove_image(slot)) }, "Remove") : null),
-        el("div", { class: "sub", style: "margin-top:6px" }, box.dataset.hint))));
+          src ? el("button", { class: "btn ghost danger", onclick: async () => done(await api.remove_image(slot)) }, "Remove") : null))));
   });
 }
-const EMAIL_FIELDS = [["e-preview-subject", "preview_subject"], ["e-preview-body", "preview_body"],
-  ["e-final-subject", "final_subject"], ["e-final-body", "final_body"]];
 const SIG_FIELDS = ["name", "firm", "phone", "email", "license", "street", "city"];
 function sigValues() { return Object.fromEntries(SIG_FIELDS.map(k => [k, $("g-" + k).value])); }
 let sigTimer = null;
@@ -613,7 +592,6 @@ $("settings-save").addEventListener("click", async () => {
     zelle: { enabled: $("m-zelle").checked, recipient: $("m-zelle-to").value, name: $("m-zelle-name").value },
     venmo: { enabled: $("m-venmo").checked, username: $("m-venmo-user").value },
     signature: sigValues(),
-    emails: Object.fromEntries(EMAIL_FIELDS.map(([id, key]) => [key, $(id).value])),
   });
   b.disabled = false;
   if (!r.ok) return flash(r.error, "err");

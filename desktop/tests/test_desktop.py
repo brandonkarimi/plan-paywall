@@ -601,25 +601,6 @@ def test_blank_placeholders_drop_out(env):
     assert text.startswith("Hello,\n\nSee Lot 7 Grading. Total $1,500.00.")
 
 
-def test_saved_wording_used_for_both_emails(env):
-    from desktop.api import Api
-
-    api = Api()
-    r = api.save_settings({"emails": {"preview_subject": "Plans ready: {project}", "preview_body": "Dear {client}, see attached.",
-                                      "final_subject": "Paid - {project}", "final_body": "Thanks {client}. Final set attached.",
-                                      }})
-    assert r["ok"]
-    tx_id = send(env)
-    assert env["smtp"].sent[-1]["Subject"] == "Plans ready: Lot 7 Grading"
-    assert body(env["smtp"].sent[-1]).startswith("Dear Jo Smith, see attached.")
-    sender.mark_paid(tx_id, "Zelle")
-    assert env["smtp"].sent[-1]["Subject"] == "Paid - Lot 7 Grading"
-    assert body(env["smtp"].sent[-1]).startswith("Thanks Jo Smith. Final set attached.")
-    # An emptied box goes back to the original wording
-    api.save_settings({"emails": {"preview_subject": "", "preview_body": "", "final_subject": "", "final_body": ""}})
-    assert config.load_settings()["emails"] == config.EMAIL_DEFAULTS
-
-
 def test_final_email_with_download_link_has_button(env):
     tx_id = send(env, share_link="https://example.com/plans")
     sender.mark_paid(tx_id, "Zelle")

@@ -283,8 +283,7 @@ def message_paragraphs(text):
 
 
 def _wording(settings, key):
-    emails = settings.get("emails") or {}
-    return (emails.get(key) or "").strip() or config.EMAIL_DEFAULTS[key]
+    return config.EMAIL_DEFAULTS[key]
 
 
 def invite(tx, settings):

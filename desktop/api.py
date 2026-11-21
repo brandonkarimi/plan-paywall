@@ -239,9 +239,6 @@ class Api:
     # ------------------------------------------------------------ settings
     def save_settings(self, payload):
         settings = config.load_settings()
-        if "emails" in payload:
-            settings["emails"] = {k: str(payload["emails"].get(k) or "").strip() or v
-                                  for k, v in config.EMAIL_DEFAULTS.items()}
         if "signature" in payload:
             settings["signature"] = {k: str(v).strip() for k, v in payload["signature"].items()}
         for field in ("zelle", "venmo"):
