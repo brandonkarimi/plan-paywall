@@ -74,9 +74,10 @@
   .full { grid-column: 1 / -1; }
   label { display: block; font-weight: 600; font-size: .85rem; margin-bottom: 4px; }
   .opt { font-weight: 400; color: var(--muted); }
-  input, select { width: 100%; font: inherit; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px;
+  input, select, textarea { width: 100%; font: inherit; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px;
     background: var(--field); color: var(--text); }
-  input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: -1px; background: var(--card); }
+  textarea { resize: vertical; line-height: 1.45; display: block; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--brand); outline-offset: -1px; background: var(--card); }
   input[type=checkbox] { width: auto; margin-right: 8px; accent-color: var(--brand); }
   .check { display: flex; align-items: center; font-weight: 600; font-size: .95rem; }
 
@@ -226,11 +227,6 @@
           <input id="f-name" type="text">
         </div>
         <div>
-          <label for="f-price">Price (USD) <span class="opt">(optional if you attach an invoice)</span></label>
-          <input id="f-price" type="text" inputmode="decimal" placeholder="1500.00, or filled in from the invoice">
-          <div class="sub hidden" id="price-hint" style="margin-top:4px"></div>
-        </div>
-        <div class="full">
           <label for="f-title">Project name <span class="opt">(optional, defaults to the file name)</span></label>
           <input id="f-title" type="text">
         </div>
@@ -259,8 +255,21 @@
           <div class="sub" style="margin-top:4px">Only emailed to the client after they pay. Don't share this link anywhere else.</div>
         </div>
         <div class="full">
+          <label for="f-subject">Email subject</label>
+          <input id="f-subject" type="text" maxlength="300">
+        </div>
+        <div class="full">
+          <label for="f-message">Email message</label>
+          <textarea id="f-message" rows="6"></textarea>
+          <div class="sub" style="margin-top:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <span style="flex:1;min-width:240px"><b>{client}</b> and <b>{project}</b> are filled in for you. Your payment QR codes and signature are added below the message.</span>
+            <button class="btn ghost" id="msg-save" type="button">Save as my default</button>
+            <button class="btn ghost" id="msg-reset" type="button">Use my default</button>
+          </div>
+        </div>
+        <div class="full">
           <button class="btn big" id="send-btn">Send with pay wall</button>
-          <p class="small muted" style="text-align:center;margin:10px 0 0">The client gets the watermarked preview, your invoice (if attached) and payment instructions. When their payment arrives, click <b>Mark as paid</b> in Transactions and the final PDF is emailed to them.</p>
+          <p class="small muted" style="text-align:center;margin:10px 0 0">The client gets your message with the watermarked preview, your invoice (if attached) and your payment QR codes. When their payment arrives, click <b>Mark as paid</b> in Transactions and the final PDF is emailed to them.</p>
         </div>
       </div>
     </div>
@@ -356,6 +365,19 @@
         <div><label>City, state, ZIP <span class="opt">(optional)</span></label><input id="g-city" type="text" placeholder="Springfield CA 90000"></div>
         <div class="full" data-picture="signature_logo" data-wide="1" data-hint="Shown on the left of your signature, like in Outlook."></div>
         <div class="full"><label>Preview</label><div class="sig-preview" id="sig-preview"></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Email messages <span class="opt small">(optional)</span></h2>
+      <p class="small muted" style="margin:-6px 0 14px">Write the emails in your own words. <b>{client}</b> (client name), <b>{project}</b> (project name) and <b>{amount}</b> (invoice total, if the app can read it) are filled in when sending; a blank one is left out. Your payment QR codes and signature are added automatically. Leave a box empty to go back to the original wording.</p>
+      <div class="grid">
+        <div class="full"><b class="small">Preview email</b> <span class="small muted">(sent with the watermarked preview; you can also change it on the Send page each time)</span></div>
+        <div class="full"><label for="e-preview-subject">Subject</label><input id="e-preview-subject" type="text" maxlength="300"></div>
+        <div class="full"><label for="e-preview-body">Message</label><textarea id="e-preview-body" rows="6"></textarea></div>
+        <div class="full" style="margin-top:6px"><b class="small">Plans email</b> <span class="small muted">(sent with the full plans after you mark a payment received)</span></div>
+        <div class="full"><label for="e-final-subject">Subject</label><input id="e-final-subject" type="text" maxlength="300"></div>
+        <div class="full"><label for="e-final-body">Message</label><textarea id="e-final-body" rows="4"></textarea></div>
       </div>
     </div>
 
@@ -493,7 +515,7 @@ function setupMode(firstRun) {
   $("nav").classList.toggle("hidden", firstRun);
   $("gear").classList.toggle("hidden", firstRun);
   $("setup-title").textContent = firstRun ? "Welcome to Plan Sender" : "Settings";
-  $("setup-sub").textContent = firstRun ? "Three quick steps and you're ready to send plans." : "Change how clients pay you, your email account or your email signature.";
+  $("setup-sub").textContent = firstRun ? "Three quick steps and you're ready to send plans." : "Change how clients pay you, your email account, your signature or your email messages.";
   $("settings-save").textContent = firstRun ? "Finish setup" : "Save changes";
   $("settings-back").classList.toggle("hidden", firstRun);
   if (firstRun && state && !state.settings.accounts.length) $("acct-add").open = true;
@@ -532,6 +554,9 @@ async function loadState() {
         if (!await ask({ title: "Remove email account?", message: `${a.email} will no longer be available as a From address. Its saved password is deleted too.`, ok: "Remove", tone: "danger", icon: "!" })) return;
         await api.remove_account(a.email); loadState(); } }, "Remove")))));
   renderPictures();
+  const em = s.emails || {};
+  EMAIL_FIELDS.forEach(([id, key]) => $(id).value = em[key] || "");
+  if (!$("f-subject").value && !$("f-message").value) useDefaultWording();
   const sig = s.signature || {};
   SIG_FIELDS.forEach(k => $("g-" + k).value = sig[k] || "");
   updateSigPreview();
@@ -555,6 +580,12 @@ function renderPictures() {
           src ? el("button", { class: "btn ghost danger", onclick: async () => done(await api.remove_image(slot)) }, "Remove") : null),
         el("div", { class: "sub", style: "margin-top:6px" }, box.dataset.hint))));
   });
+}
+const EMAIL_FIELDS = [["e-preview-subject", "preview_subject"], ["e-preview-body", "preview_body"],
+  ["e-final-subject", "final_subject"], ["e-final-body", "final_body"]];
+function useDefaultWording() {
+  const em = (state && state.settings.emails) || {};
+  $("f-subject").value = em.preview_subject || ""; $("f-message").value = em.preview_body || "";
 }
 const SIG_FIELDS = ["name", "firm", "phone", "email", "license", "street", "city"];
 function sigValues() { return Object.fromEntries(SIG_FIELDS.map(k => [k, $("g-" + k).value])); }
@@ -589,10 +620,12 @@ $("settings-save").addEventListener("click", async () => {
     zelle: { enabled: $("m-zelle").checked, recipient: $("m-zelle-to").value, name: $("m-zelle-name").value },
     venmo: { enabled: $("m-venmo").checked, username: $("m-venmo-user").value },
     signature: sigValues(),
+    emails: Object.fromEntries(EMAIL_FIELDS.map(([id, key]) => [key, $(id).value])),
   });
   b.disabled = false;
   if (!r.ok) return flash(r.error, "err");
   await loadState();
+  useDefaultWording();  // the Send page starts from the newly saved wording
   if (state.setup_needed) {
     const missing = [];
     if (!state.settings.enabled_methods.length) missing.push("turn on Zelle or Venmo (step 1)");
@@ -614,8 +647,7 @@ async function pickFile() {
   $("pick-info").textContent = `${r.pages} page${r.pages === 1 ? "" : "s"} · ${r.size_mb} MB · click to change`;
   $("share-wrap").classList.toggle("hidden", !r.too_big);
 }
-let invoice = null, priceFromInvoice = false;
-function priceHint(text) { $("price-hint").textContent = text || ""; $("price-hint").classList.toggle("hidden", !text); }
+let invoice = null;
 async function pickInvoice() {
   const r = await api.choose_invoice();
   if (!r.ok) return flash(r.error, "err");
@@ -623,39 +655,37 @@ async function pickInvoice() {
   invoice = r;
   $("inv-pick").classList.add("has"); $("inv-clear").classList.remove("hidden");
   $("inv-name").textContent = r.name;
-  $("inv-info").textContent = r.amount ? `Total found: $${Number(r.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "Attached";
-  if (r.amount && (!$("f-price").value.trim() || priceFromInvoice)) {
-    $("f-price").value = r.amount; priceFromInvoice = true;
-    priceHint("Filled in from the invoice. Check it's right.");
-  } else if (!r.amount) {
-    priceHint("Couldn't read a total from this invoice. Enter the price, or leave it blank to just say “see invoice”.");
-  }
+  $("inv-info").textContent = r.amount ? `Total: $${Number(r.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} · click to change` : "Attached · click to change";
 }
 function clearInvoice() {
   invoice = null;
   $("inv-pick").classList.remove("has"); $("inv-clear").classList.add("hidden");
   $("inv-name").textContent = "Attach an invoice…"; $("inv-info").textContent = "Sent to the client as-is";
-  if (priceFromInvoice) { $("f-price").value = ""; priceFromInvoice = false; }
-  priceHint("");
 }
 $("inv-pick").addEventListener("click", (e) => { if (!e.target.closest("#inv-clear")) pickInvoice(); });
 $("inv-pick").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pickInvoice(); });
 $("inv-clear").addEventListener("click", (e) => { e.stopPropagation(); clearInvoice(); });
-$("f-price").addEventListener("input", () => { priceFromInvoice = false; priceHint(""); });
+$("msg-reset").addEventListener("click", useDefaultWording);
+$("msg-save").addEventListener("click", async () => {
+  const r = await api.save_preview_wording($("f-subject").value, $("f-message").value);
+  if (!r.ok) return flash(r.error, "err");
+  state = r.state; EMAIL_FIELDS.forEach(([id, key]) => $(id).value = state.settings.emails[key] || ""); flash(r.message);
+});
 $("pick").addEventListener("click", pickFile);
 $("pick").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pickFile(); });
 $("send-btn").addEventListener("click", async () => {
   const b = $("send-btn"); b.disabled = true; b.textContent = "Building preview and sending…";
   const r = await api.send({ from_email: $("f-from").value, to_email: $("f-to").value, client_name: $("f-name").value,
-    title: $("f-title").value, price: $("f-price").value, pdf_path: chosen ? chosen.path : "", share_link: $("f-share").value,
+    title: $("f-title").value, price: invoice ? invoice.amount : "", pdf_path: chosen ? chosen.path : "", share_link: $("f-share").value,
     methods: [...document.querySelectorAll("#f-methods input:checked")].map(i => i.value),
-    invoice_path: invoice ? invoice.path : "" });
+    invoice_path: invoice ? invoice.path : "", subject: $("f-subject").value, message: $("f-message").value });
   b.disabled = false; b.textContent = "Send with pay wall";
   if (!r.ok) { if (r.need_share_link) $("share-wrap").classList.remove("hidden"); return flash(r.error, "err"); }
-  ["f-to", "f-name", "f-title", "f-price", "f-share"].forEach(id => $(id).value = "");
+  ["f-to", "f-name", "f-title", "f-share"].forEach(id => $(id).value = "");
+  useDefaultWording();
   chosen = null; $("pick").classList.remove("has"); $("pick-name").textContent = "Choose the plan PDF…";
   $("pick-info").textContent = "Sent as a watermarked preview"; $("share-wrap").classList.add("hidden");
-  priceFromInvoice = false; clearInvoice();
+  clearInvoice();
   // Jump to the log with the new send opened, so it's obvious where it went.
   $("tx-search").value = "";
   await showTab("tx");

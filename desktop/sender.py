@@ -56,12 +56,13 @@ INVOICE_LIMIT_BYTES = 6 * 1024 * 1024
 
 
 def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="", share_link="", methods=None,
-               invoice_path="", settings=None):
+               invoice_path="", subject="", message="", settings=None):
     """Returns the new transaction id. Raises SendError (NeedShareLink for very large PDFs).
 
     methods: "zelle" and/or "venmo" (default: every method enabled in Settings).
-    invoice_path: optional invoice PDF, attached to the email as-is. With an invoice the price is optional
-    (0 = "see invoice").
+    invoice_path: optional invoice PDF, attached to the email as-is.
+    price: optional (the app fills it in from the invoice total when it can read one); 0 = not known.
+    subject, message: the preview email's wording for this send ("" = the defaults from Settings).
     """
     settings = settings or config.load_settings()
     from_email, to_email = from_email.strip(), to_email.strip()
@@ -87,12 +88,10 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
                 raise SendError(f"Invoice: {exc}")
         if inv_info["size_bytes"] > INVOICE_LIMIT_BYTES:
             raise SendError("The invoice PDF is too large to email (over 6 MB).")
-    if invoice is not None and not str(price or "").strip():
-        price_cents = 0  # amount is on the invoice
-    elif not str(price or "").strip():
-        raise SendError("Enter the price, or attach an invoice to fill it in.")
-    else:
-        price_cents = _price_cents(price)
+    price_cents = _price_cents(price) if str(price or "").strip() else 0
+    subject, message = (subject or "").strip(), (message or "").strip()
+    if len(subject) > 300:
+        raise SendError("The email subject is too long (300 characters at most).")
     src = Path(pdf_path or "")
     if not src.is_file():
         raise SendError("Choose the plan PDF to send.")
@@ -118,7 +117,7 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
         title=title, client_name=client_name, client_email=to_email, from_email=from_email,
         price_cents=price_cents, status="draft", original_name=src.name, share_link=share_link,
         sha256=info["sha256"], pages=info["page_count"], size_bytes=info["size_bytes"], sheets=info["sheet_index"],
-        methods=methods,
+        methods=methods, email_subject=subject, email_body=message,
     )
     db.update_tx(tx_id, ref_code=f"PLN-{tx_id}")
     folder = config.files_dir(tx_id)

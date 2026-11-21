@@ -166,10 +166,6 @@ def _wrap(paragraphs, settings, button=None):
     return text, html
 
 
-def _greeting(tx):
-    return f"Hello {tx['client_name']}," if tx.get("client_name") else "Hello,"
-
-
 QR_SIZE = 200  # px, roughly; two cards side by side still fit the 600px message width
 QR_CARD = {
     "zelle": ("Zelle", "#6d1ed4"),
@@ -263,18 +259,43 @@ def _qr_block(tx, settings):
     return {"html": html}, {method for method, _, _ in cards}
 
 
+def fill(template, tx):
+    """Fill in {client}, {project} and {amount}. A blank one drops out with the space before it,
+    so "Hello {client}," becomes "Hello," when there's no client name."""
+    import re
+
+    cents = tx.get("price_cents") or 0
+    values = {"client": tx.get("client_name") or "", "project": tx.get("title") or "",
+              "amount": money(cents) if cents else ""}
+    for key, value in values.items():
+        pattern = r"\{" + key + r"\}" if value else r"[ \t]*\{" + key + r"\}"
+        template = re.sub(pattern, lambda _m: value, template, flags=re.IGNORECASE)
+    return template.strip()
+
+
+def message_paragraphs(text):
+    """The engineer's message as paragraphs (split at blank lines), each a list of lines."""
+    import re
+
+    text = text.replace("\r\n", "\n").strip()
+    return [[line.rstrip() for line in block.split("\n")]
+            for block in re.split(r"\n[ \t]*\n+", text) if block.strip()]
+
+
+def _wording(settings, key):
+    emails = settings.get("emails") or {}
+    return (emails.get(key) or "").strip() or config.EMAIL_DEFAULTS[key]
+
+
 def invite(tx, settings):
-    """The preview email: greeting, one short message, how to pay. The preview (and invoice) are attached."""
+    """The preview email: the engineer's own subject and message, then how to pay (QR codes).
+    The preview (and invoice) are attached."""
+    subject = fill((tx.get("email_subject") or "").strip() or _wording(settings, "preview_subject"), tx)
+    message = fill((tx.get("email_body") or "").strip() or _wording(settings, "preview_body"), tx)
     cents = tx["price_cents"]
-    price = money(cents) if cents else ""
-    pay = price or "the invoice amount"
+    pay = money(cents) if cents else "the invoice amount" if tx.get("invoice_path") else "payment"
     methods = tx.get("methods") or []
-    if tx.get("invoice_path"):
-        intro = (f"Here is a preview of your plans for {tx['title']}, along with your invoice"
-                 + (f" for {price}" if price else "") + ". To receive the full PDF, please pay the invoice.")
-    else:
-        intro = f"Here is a preview of your plans for {tx['title']}. To receive the full PDF, please pay {price}."
-    paragraphs = [_greeting(tx), intro]
+    paragraphs = message_paragraphs(message)
     options = {}
     if "zelle" in methods:
         z = settings.get("zelle") or {}
@@ -289,30 +310,31 @@ def invite(tx, settings):
     qr, shown = _qr_block(tx, settings)
 
     def how_to_pay(lines):
-        if len(options) > 1:  # make it obvious the client only needs to use one of them
+        if len(options) > 1 and lines:  # make it obvious the client only needs to use one of them
             return ["You can pay with Zelle or Venmo, whichever you prefer:"] + [f"  • {o}" for o in lines]
-        return lines or [f"You can pay with {config.PAYMENT_METHODS[m]}:" for m in options]
+        return lines
 
     # A QR card already shows who to pay, so its line is left out of the email; text-only mail apps still get it.
     paragraphs.append({"text": how_to_pay(list(options.values())),
                        "html": how_to_pay([o for m, o in options.items() if m not in shown])})
     if qr:
         paragraphs.append(qr)
-    paragraphs.append("Once payment is received, the full PDF will be emailed to you.")
     text, html = _wrap(paragraphs, settings)
-    return f"Preview: {tx['title']}", text, html
+    return " ".join(subject.split()) or f"Preview: {tx['title']}", text, html
 
 
 def files(tx, settings):
-    """The final-plans email, sent once the engineer marks the payment received."""
+    """The final-plans email, sent once the engineer marks the payment received: their own subject and message,
+    plus a download button when the plans go by link instead of attachment."""
+    subject = fill(_wording(settings, "final_subject"), tx)
+    paragraphs = message_paragraphs(fill(_wording(settings, "final_body"), tx))
+    button = None
     if tx.get("share_link"):
-        body = f"Thank you for your payment. Download the full plans for {tx['title']} here:"
-        button = {"after": body, "label": "Download plans", "url": tx["share_link"]}
-    else:
-        body = f"Thank you for your payment. The full plans for {tx['title']} are attached."
-        button = None
-    text, html = _wrap([_greeting(tx), body], settings, button)
-    return f"Plans: {tx['title']}", text, html
+        if not paragraphs:
+            paragraphs = [["Download the full plans here:"]]
+        button = {"after": paragraphs[-1], "label": "Download plans", "url": tx["share_link"]}
+    text, html = _wrap(paragraphs, settings, button)
+    return " ".join(subject.split()) or f"Plans: {tx['title']}", text, html
 
 
 def test_message(settings):

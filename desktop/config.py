@@ -27,6 +27,14 @@ SMTP_PRESETS = {
     "custom": {"label": "Other (custom SMTP)", "host": "", "port": 587, "security": "starttls", "help": ""},
 }
 
+EMAIL_DEFAULTS = {
+    "preview_subject": "Preview: {project}",
+    "preview_body": "Hello {client},\n\nHere is a preview of your plans for {project}. To receive the full PDF, please "
+                    "pay using one of the options below. Once payment is received, the full PDF will be emailed to you.",
+    "final_subject": "Plans: {project}",
+    "final_body": "Hello {client},\n\nThank you for your payment. Here are the full plans for {project}.",
+}
+
 DEFAULT_SETTINGS = {
     "accounts": [],          # [{"email", "name", "preset", "host", "port", "security"}]; passwords in keyring
     "default_from": "",
@@ -34,6 +42,9 @@ DEFAULT_SETTINGS = {
     "signature": {"name": "", "firm": "", "license": "", "phone": "", "email": "", "street": "", "city": ""},
     "zelle": {"enabled": False, "recipient": "", "name": ""},   # email/phone clients send to + name shown in Zelle
     "venmo": {"enabled": False, "username": ""},
+    # Wording of the two emails, editable in Settings (the preview one can also be changed per send).
+    # {client}, {project} and {amount} are filled in when sending; blank ones drop out ("Hello {client}," → "Hello,").
+    "emails": dict(EMAIL_DEFAULTS),
     "preview_dpi": 100,
     "seal_box": "",
     "theme": "light",        # "light" (blue and white) or "dark"

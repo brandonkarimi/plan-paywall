@@ -65,7 +65,8 @@ def transaction_view(tx):
     return {
         "id": tx["id"], "title": tx["title"], "client_name": tx["client_name"], "client_email": tx["client_email"],
         "from_email": tx["from_email"], "status": tx["status"],
-        "price": mailer.money(tx["price_cents"]) if tx["price_cents"] else "On invoice",
+        "price": (mailer.money(tx["price_cents"]) if tx["price_cents"]
+                  else "On invoice" if tx.get("invoice_path") else "-"),
         "price_value": f"{tx['price_cents'] / 100:.2f}" if tx["price_cents"] else "",
         "has_invoice": bool(tx.get("invoice_path")),
         "label": label, "tone": tone, "sent_at": tx["sent_at"], "paid_at": tx["paid_at"], "pages": tx["pages"],
@@ -156,6 +157,7 @@ class Api:
                 client_name=form.get("client_name", ""), title=form.get("title", ""),
                 share_link=form.get("share_link", ""), methods=form.get("methods"),
                 invoice_path=form.get("invoice_path", ""),
+                subject=form.get("subject", ""), message=form.get("message", ""),
             )
         except sender.NeedShareLink as exc:
             return _err(exc, need_share_link=True)
@@ -237,6 +239,9 @@ class Api:
     # ------------------------------------------------------------ settings
     def save_settings(self, payload):
         settings = config.load_settings()
+        if "emails" in payload:
+            settings["emails"] = {k: str(payload["emails"].get(k) or "").strip() or v
+                                  for k, v in config.EMAIL_DEFAULTS.items()}
         if "signature" in payload:
             settings["signature"] = {k: str(v).strip() for k, v in payload["signature"].items()}
         for field in ("zelle", "venmo"):
@@ -252,6 +257,15 @@ class Api:
                 settings[field] = {**settings[field], **clean}
         config.save_settings(settings)
         return _ok(state=self.state())
+
+    def save_preview_wording(self, subject, message):
+        """'Save as my default' on the Send page: keep this subject and message for future sends."""
+        settings = config.load_settings()
+        settings["emails"] = {**config.EMAIL_DEFAULTS, **settings.get("emails", {}),
+                              "preview_subject": (subject or "").strip() or config.EMAIL_DEFAULTS["preview_subject"],
+                              "preview_body": (message or "").strip() or config.EMAIL_DEFAULTS["preview_body"]}
+        config.save_settings(settings)
+        return _ok(state=self.state(), message="Saved. New sends will start with this subject and message.")
 
     def signature_preview(self, signature):
         """The email signature as clients will see it, for the live preview in Settings."""

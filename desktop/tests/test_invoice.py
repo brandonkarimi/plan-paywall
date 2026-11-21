@@ -51,7 +51,6 @@ def test_invoice_without_price(env, invoice):
     assert names == ["Invoice - Lot 7 Grading.pdf", "PREVIEW - Lot 7 Grading.pdf"]
     assert attachments(msg)[0][1] == invoice.read_bytes()
     text = body(msg)
-    assert "along with your invoice. To receive the full PDF, please pay the invoice." in text
     assert "Zelle: send the invoice amount to pat@acmecivil.test" in text
     assert "Venmo: send the invoice amount to @AcmeCivil-Eng" in text
     assert log_texts(tx_id) == ["Preview and invoice sent to client@example.com"]
@@ -60,12 +59,16 @@ def test_invoice_without_price(env, invoice):
 def test_invoice_with_price(env, invoice):
     send(env, price="1500", invoice_path=str(invoice))
     text = body(env["smtp"].sent[0])
-    assert "along with your invoice for $1,500.00." in text and "Zelle: send $1,500.00" in text
+    assert "Zelle: send $1,500.00" in text
 
 
-def test_price_still_required_without_invoice(env):
-    with pytest.raises(sender.SendError, match="Enter the price, or attach an invoice"):
-        send(env, price="")
+def test_price_optional_without_invoice(env):
+    from desktop.api import Api
+
+    tx_id = send(env, price="")
+    assert db.get_tx(tx_id)["price_cents"] == 0
+    assert "Zelle: send payment to pat@acmecivil.test" in body(env["smtp"].sent[0])
+    assert Api().transactions()["items"][0]["price"] == "-"
 
 
 def test_bad_invoice_rejected(env):

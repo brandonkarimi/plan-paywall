@@ -39,7 +39,7 @@ def test_send_emails_preview_and_instructions_but_never_the_final(env):
     assert msg["To"] == "client@example.com" and msg["Reply-To"] == "pat@acmecivil.test"
     text = body(msg)
     assert text.startswith("Hello Jo Smith,")
-    assert "Here is a preview of your plans for Lot 7 Grading. To receive the full PDF, please pay $1,500.00." in text
+    assert "Here is a preview of your plans for Lot 7 Grading. To receive the full PDF, please pay using one of the options below." in text
     assert "Zelle: send $1,500.00 to pat@acmecivil.test (Pat Lee)" in text
     assert "Venmo: send $1,500.00 to @AcmeCivil-Eng" in text and "venmo.com" not in text  # no Venmo button
     assert "Once payment is received, the full PDF will be emailed to you." in text
@@ -103,7 +103,7 @@ def test_mark_paid_delivers_final_once(env):
     (msg,) = env["smtp"].sent
     (name, data), = attachments(msg)
     assert name == "Lot 7 Grading.pdf" and data == env["pdf"].read_bytes()
-    assert body(msg).startswith("Hello Jo Smith,\n\nThank you for your payment. The full plans for Lot 7 Grading are attached.")
+    assert body(msg).startswith("Hello Jo Smith,\n\nThank you for your payment. Here are the full plans for Lot 7 Grading.")
     with pytest.raises(sender.SendError, match="already marked paid"):
         sender.mark_paid(tx_id, "Zelle")
     assert len(env["smtp"].sent) == 1
@@ -578,3 +578,55 @@ def test_delete_removes_read_only_files(env):
     folder = Path(db.get_tx(tx_id)["final_path"]).parent
     Api().delete_tx(tx_id)
     assert not folder.exists()
+
+
+# ------------------------------------------------------------------ custom email wording
+def test_custom_subject_and_message_per_send(env):
+    tx_id = send(env, subject="Your {project} plans", message="Hi {client}!\n\nPlans attached.\nPay below, thanks.")
+    msg = env["smtp"].sent[-1]
+    assert msg["Subject"] == "Your Lot 7 Grading plans"
+    text = body(msg)
+    assert text.startswith("Hi Jo Smith!\n\nPlans attached.\nPay below, thanks.")
+    assert "Here is a preview" not in text and "Zelle: send $1,500.00 to pat@acmecivil.test" in text
+    html = msg.get_body(("html",)).get_content()
+    assert "Hi Jo Smith!" in html and "Plans attached.<br>Pay below, thanks." in html
+    sender.resend(tx_id)  # a resend repeats the wording used for this send
+    assert env["smtp"].sent[-1]["Subject"] == "Your Lot 7 Grading plans"
+    assert body(env["smtp"].sent[-1]).startswith("Hi Jo Smith!")
+
+
+def test_blank_placeholders_drop_out(env):
+    send(env, client_name="", message="Hello {client},\n\nSee {project}. Total {amount}.")
+    text = body(env["smtp"].sent[-1])
+    assert text.startswith("Hello,\n\nSee Lot 7 Grading. Total $1,500.00.")
+
+
+def test_saved_wording_used_for_both_emails(env):
+    from desktop.api import Api
+
+    api = Api()
+    r = api.save_settings({"emails": {"preview_subject": "Plans ready: {project}", "preview_body": "Dear {client}, see attached.",
+                                      "final_subject": "Paid - {project}", "final_body": "Thanks {client}. Final set attached.",
+                                      }})
+    assert r["ok"]
+    tx_id = send(env)
+    assert env["smtp"].sent[-1]["Subject"] == "Plans ready: Lot 7 Grading"
+    assert body(env["smtp"].sent[-1]).startswith("Dear Jo Smith, see attached.")
+    sender.mark_paid(tx_id, "Zelle")
+    assert env["smtp"].sent[-1]["Subject"] == "Paid - Lot 7 Grading"
+    assert body(env["smtp"].sent[-1]).startswith("Thanks Jo Smith. Final set attached.")
+    # An emptied box goes back to the original wording
+    api.save_settings({"emails": {"preview_subject": "", "preview_body": "", "final_subject": "", "final_body": ""}})
+    assert config.load_settings()["emails"] == config.EMAIL_DEFAULTS
+    # "Save as my default" on the Send page
+    r = api.save_preview_wording("Hi {project}", "Body text")
+    assert r["ok"] and config.load_settings()["emails"]["preview_subject"] == "Hi {project}"
+    assert config.load_settings()["emails"]["final_body"] == config.EMAIL_DEFAULTS["final_body"]
+
+
+def test_final_email_with_download_link_has_button(env):
+    tx_id = send(env, share_link="https://example.com/plans")
+    sender.mark_paid(tx_id, "Zelle")
+    msg = env["smtp"].sent[-1]
+    assert "Download plans: https://example.com/plans" in body(msg)
+    assert "https://example.com/plans" in msg.get_body(("html",)).get_content()
