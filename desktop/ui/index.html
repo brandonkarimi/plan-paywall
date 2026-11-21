@@ -261,15 +261,9 @@
         <div class="full">
           <label for="f-message">Email message</label>
           <textarea id="f-message" rows="6"></textarea>
-          <div class="sub" style="margin-top:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <span style="flex:1;min-width:240px"><b>{client}</b> and <b>{project}</b> are filled in for you. Your payment QR codes and signature are added below the message.</span>
-            <button class="btn ghost" id="msg-save" type="button">Save as my default</button>
-            <button class="btn ghost" id="msg-reset" type="button">Use my default</button>
-          </div>
         </div>
         <div class="full">
-          <button class="btn big" id="send-btn">Send with pay wall</button>
-          <p class="small muted" style="text-align:center;margin:10px 0 0">The client gets your message with the watermarked preview, your invoice (if attached) and your payment QR codes. When their payment arrives, click <b>Mark as paid</b> in Transactions and the final PDF is emailed to them.</p>
+          <button class="btn big" id="send-btn">Send</button>
         </div>
       </div>
     </div>
@@ -556,7 +550,6 @@ async function loadState() {
   renderPictures();
   const em = s.emails || {};
   EMAIL_FIELDS.forEach(([id, key]) => $(id).value = em[key] || "");
-  if (!$("f-subject").value && !$("f-message").value) useDefaultWording();
   const sig = s.signature || {};
   SIG_FIELDS.forEach(k => $("g-" + k).value = sig[k] || "");
   updateSigPreview();
@@ -583,10 +576,6 @@ function renderPictures() {
 }
 const EMAIL_FIELDS = [["e-preview-subject", "preview_subject"], ["e-preview-body", "preview_body"],
   ["e-final-subject", "final_subject"], ["e-final-body", "final_body"]];
-function useDefaultWording() {
-  const em = (state && state.settings.emails) || {};
-  $("f-subject").value = em.preview_subject || ""; $("f-message").value = em.preview_body || "";
-}
 const SIG_FIELDS = ["name", "firm", "phone", "email", "license", "street", "city"];
 function sigValues() { return Object.fromEntries(SIG_FIELDS.map(k => [k, $("g-" + k).value])); }
 let sigTimer = null;
@@ -625,7 +614,6 @@ $("settings-save").addEventListener("click", async () => {
   b.disabled = false;
   if (!r.ok) return flash(r.error, "err");
   await loadState();
-  useDefaultWording();  // the Send page starts from the newly saved wording
   if (state.setup_needed) {
     const missing = [];
     if (!state.settings.enabled_methods.length) missing.push("turn on Zelle or Venmo (step 1)");
@@ -665,12 +653,6 @@ function clearInvoice() {
 $("inv-pick").addEventListener("click", (e) => { if (!e.target.closest("#inv-clear")) pickInvoice(); });
 $("inv-pick").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pickInvoice(); });
 $("inv-clear").addEventListener("click", (e) => { e.stopPropagation(); clearInvoice(); });
-$("msg-reset").addEventListener("click", useDefaultWording);
-$("msg-save").addEventListener("click", async () => {
-  const r = await api.save_preview_wording($("f-subject").value, $("f-message").value);
-  if (!r.ok) return flash(r.error, "err");
-  state = r.state; EMAIL_FIELDS.forEach(([id, key]) => $(id).value = state.settings.emails[key] || ""); flash(r.message);
-});
 $("pick").addEventListener("click", pickFile);
 $("pick").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pickFile(); });
 $("send-btn").addEventListener("click", async () => {
@@ -679,10 +661,9 @@ $("send-btn").addEventListener("click", async () => {
     title: $("f-title").value, price: invoice ? invoice.amount : "", pdf_path: chosen ? chosen.path : "", share_link: $("f-share").value,
     methods: [...document.querySelectorAll("#f-methods input:checked")].map(i => i.value),
     invoice_path: invoice ? invoice.path : "", subject: $("f-subject").value, message: $("f-message").value });
-  b.disabled = false; b.textContent = "Send with pay wall";
+  b.disabled = false; b.textContent = "Send";
   if (!r.ok) { if (r.need_share_link) $("share-wrap").classList.remove("hidden"); return flash(r.error, "err"); }
-  ["f-to", "f-name", "f-title", "f-share"].forEach(id => $(id).value = "");
-  useDefaultWording();
+  ["f-to", "f-name", "f-title", "f-share", "f-subject", "f-message"].forEach(id => $(id).value = "");
   chosen = null; $("pick").classList.remove("has"); $("pick-name").textContent = "Choose the plan PDF…";
   $("pick-info").textContent = "Sent as a watermarked preview"; $("share-wrap").classList.add("hidden");
   clearInvoice();

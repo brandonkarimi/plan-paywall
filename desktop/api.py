@@ -258,15 +258,6 @@ class Api:
         config.save_settings(settings)
         return _ok(state=self.state())
 
-    def save_preview_wording(self, subject, message):
-        """'Save as my default' on the Send page: keep this subject and message for future sends."""
-        settings = config.load_settings()
-        settings["emails"] = {**config.EMAIL_DEFAULTS, **settings.get("emails", {}),
-                              "preview_subject": (subject or "").strip() or config.EMAIL_DEFAULTS["preview_subject"],
-                              "preview_body": (message or "").strip() or config.EMAIL_DEFAULTS["preview_body"]}
-        config.save_settings(settings)
-        return _ok(state=self.state(), message="Saved. New sends will start with this subject and message.")
-
     def signature_preview(self, signature):
         """The email signature as clients will see it, for the live preview in Settings."""
         logo = images.thumbnails().get("signature_logo") or None

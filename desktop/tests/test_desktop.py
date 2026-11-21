@@ -618,10 +618,6 @@ def test_saved_wording_used_for_both_emails(env):
     # An emptied box goes back to the original wording
     api.save_settings({"emails": {"preview_subject": "", "preview_body": "", "final_subject": "", "final_body": ""}})
     assert config.load_settings()["emails"] == config.EMAIL_DEFAULTS
-    # "Save as my default" on the Send page
-    r = api.save_preview_wording("Hi {project}", "Body text")
-    assert r["ok"] and config.load_settings()["emails"]["preview_subject"] == "Hi {project}"
-    assert config.load_settings()["emails"]["final_body"] == config.EMAIL_DEFAULTS["final_body"]
 
 
 def test_final_email_with_download_link_has_button(env):
