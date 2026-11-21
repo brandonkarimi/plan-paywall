@@ -172,8 +172,8 @@ def _greeting(tx):
 
 QR_SIZE = 200  # px, roughly; two cards side by side still fit the 600px message width
 QR_CARD = {
-    "zelle": ("Zelle", "#6d1ed4", "Scan in your banking app to pay"),
-    "venmo": ("Venmo", "#008cff", "Scan with the Venmo app to pay"),
+    "zelle": ("Zelle", "#6d1ed4"),
+    "venmo": ("Venmo", "#008cff"),
 }
 
 
@@ -249,16 +249,15 @@ def _qr_block(tx, settings):
     modules = max(len(m) for _, _, m in cards) + 6  # same size for every code
     cells = []
     for i, (method, who, matrix) in enumerate(cards):
-        label, color, caption = QR_CARD[method]
+        label, color = QR_CARD[method]
         if i:
             cells.append("<td width=14 style='width:14px'></td>")
         cells.append(
             f"<td width={CARD_WIDTH} valign=top style='width:{CARD_WIDTH}px;border:1px solid #e5e7eb;"
-            "border-radius:12px;padding:14px 0 12px;text-align:center;vertical-align:top'>"
+            "border-radius:12px;padding:14px 0;text-align:center;vertical-align:top'>"
             f"<div style='font-size:20px;font-weight:700;color:{color}'>{label}</div>"
             f"<div style='font-size:15px;font-weight:600;color:#16191d;margin:2px 0 10px'>{escape(who) or '&nbsp;'}</div>"
-            + qr_table(matrix, modules=modules)
-            + f"<div style='font-size:13px;color:#444;margin-top:10px'>{caption}</div></td>")
+            + qr_table(matrix, modules=modules) + "</td>")
     html = ("<table role='presentation' cellpadding=0 cellspacing=0 style='margin:2px 0 18px;"
             "border-collapse:separate'><tr>" + "".join(cells) + "</tr></table>")
     return {"html": html}, {method for method, _, _ in cards}
