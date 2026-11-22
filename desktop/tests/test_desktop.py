@@ -645,3 +645,10 @@ def test_unsent_send_page_is_kept_after_closing(env):
     # Cleared page (after sending): no draft
     api.save_draft({"from_email": "pat@acmecivil.test"})
     assert api.load_draft()["draft"] is None and not config.draft_path().exists()
+
+
+def test_signature_has_no_firm_line(env):
+    send(env)  # the test settings still have an old saved firm, "Acme Civil"
+    msg = env["smtp"].sent[-1]
+    assert "Pat Lee" in body(msg) and "Acme Civil" not in body(msg)
+    assert "Acme Civil" not in msg.get_body(("html",)).get_content()

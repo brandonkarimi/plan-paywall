@@ -86,7 +86,7 @@ SIG_LINK = "color:#1a56db;text-decoration:underline"
 def _signature(settings):
     """Plain-text signature lines."""
     sig = {k: str(v).strip() for k, v in (settings.get("signature") or {}).items()}
-    lines = [sig[k] for k in ("name", "firm") if sig.get(k)]
+    lines = [sig["name"]] if sig.get("name") else []
     if sig.get("phone"):
         lines.append(f"Cell: {sig['phone']}")
     if sig.get("email"):
@@ -107,8 +107,6 @@ def signature_html(settings, logo_src=None):
     if sig.get("name"):
         rows.append(f"<div style='font-family:Cambria,Georgia,serif;font-weight:700;font-size:16px;color:#0f1f3d'>"
                     f"{escape(sig['name'])}</div>")
-    if sig.get("firm"):
-        rows.append(f"<div>{escape(sig['firm'])}</div>")
     if sig.get("phone"):
         digits = "".join(c for c in sig["phone"] if c.isdigit() or c == "+")
         rows.append(f"<div>Cell: <a href='tel:{escape(digits)}' style='{SIG_LINK}'>{escape(sig['phone'])}</a></div>")
@@ -125,7 +123,7 @@ def signature_html(settings, logo_src=None):
     details = (f"<td style='padding:2px 0 2px 14px;border-left:2px solid #16191d;font-size:14px;line-height:1.7;"
                f"color:#16191d;vertical-align:middle'>{''.join(rows)}</td>") if rows else ""
     logo = (f"<td style='padding:0 16px 0 0;vertical-align:middle'><img src='{escape(logo_src)}' alt='"
-            f"{escape(sig.get('firm') or 'Logo')}' height=90 style='height:90px;width:auto;display:block;border:0'></td>"
+            "Logo' height=90 style='height:90px;width:auto;display:block;border:0'></td>"
             ) if logo_src else ""
     return ("<table role='presentation' cellpadding=0 cellspacing=0 border=0 style='margin:22px 0 0;"
             f"font-family:Segoe UI,Arial,sans-serif'><tr>{logo}{details}</tr></table>")

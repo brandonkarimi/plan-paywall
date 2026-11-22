@@ -355,11 +355,9 @@
       <h2><span class="step">3</span>Your email signature</h2>
       <div class="grid">
         <div><label>Name and credentials</label><input id="g-name" type="text" placeholder="Pat Lee, MSCE, PE"></div>
-        <div><label>Firm</label><input id="g-firm" type="text"></div>
         <div><label>Cell phone</label><input id="g-phone" type="text" placeholder="555-123-4567"></div>
         <div><label>Email</label><input id="g-email" type="email" placeholder="you@yourfirm.com"></div>
         <div><label>PE license #</label><input id="g-license" type="text"></div>
-        <div></div>
         <div><label>Street address</label><input id="g-street" type="text" placeholder="123 Main St #100"></div>
         <div><label>City, state, ZIP</label><input id="g-city" type="text" placeholder="Springfield CA 90000"></div>
         <div class="full" data-picture="signature_logo" data-wide="1"></div>
@@ -584,7 +582,7 @@ function renderPictures() {
           src ? el("button", { class: "btn ghost danger", onclick: async () => done(await api.remove_image(slot)) }, "Remove") : null))));
   });
 }
-const SIG_FIELDS = ["name", "firm", "phone", "email", "license", "street", "city"];
+const SIG_FIELDS = ["name", "phone", "email", "license", "street", "city"];
 function sigValues() { return Object.fromEntries(SIG_FIELDS.map(k => [k, $("g-" + k).value])); }
 let sigTimer = null;
 function updateSigPreview() {

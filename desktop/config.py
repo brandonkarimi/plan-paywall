@@ -41,7 +41,7 @@ DEFAULT_SETTINGS = {
     "accounts": [],          # [{"email", "name", "preset", "host", "port", "security"}]; passwords in keyring
     "default_from": "",
     # Email signature; "name" includes credentials as the engineer wants them shown (e.g. "Pat Lee, PE").
-    "signature": {"name": "", "firm": "", "license": "", "phone": "", "email": "", "street": "", "city": ""},
+    "signature": {"name": "", "license": "", "phone": "", "email": "", "street": "", "city": ""},
     "zelle": {"enabled": False, "recipient": "", "name": ""},   # email/phone clients send to + name shown in Zelle
     "venmo": {"enabled": False, "username": ""},
     # Automatic payments: the inbox(es) that get the Wells Fargo (Zelle) and Venmo payment emails; an empty Venmo
