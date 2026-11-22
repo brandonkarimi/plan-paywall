@@ -253,7 +253,7 @@ class Api:
             log.exception("Send failed")
             return _err(f"Unexpected error: {exc}")
         tx = db.get_tx(tx_id)
-        return _ok(tx_id=tx_id, message=f"Sent to {tx['client_email']}. Click Mark as paid once their payment arrives.")
+        return _ok(tx_id=tx_id, message=f"Sent to {tx['client_email']}.")
 
     # ------------------------------------------------------------ automatic payments
     def _set_auto_payments(self, settings, data):
