@@ -222,7 +222,7 @@ def _zelle_contact(qr_link):
 
 
 CARD_WIDTH = 236  # px; both cards share it, and two side by side fit the 600px message width
-CARD_LOGO_HEIGHT = 36  # px; the logo shown small at the top of each payment card
+CARD_LOGO_HEIGHT = 64  # px; the logo shown small at the top of each payment card
 
 
 def venmo_link(username, cents):
