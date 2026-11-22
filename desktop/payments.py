@@ -41,6 +41,7 @@ CODE_RE = re.compile(r"\bPLN[\s\-_#:]*0*(\d{1,7})\b", re.IGNORECASE)
 AMOUNT_RE = re.compile(r"\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?)")
 LOOKBACK_LIMIT = timedelta(days=60)
 CLOCK_SLACK = timedelta(minutes=5)  # the bank's clock and this PC's may differ a little
+SHORT_OK = 1000                     # cents: paying less than this under the price still releases the plans
 IDLE_RENEW = 25 * 60                # servers end a wait-for-new-mail after ~29 minutes; renew before that
 
 _lock = threading.Lock()  # one check at a time
@@ -242,7 +243,7 @@ def match(payment, waiting):
         tx = by_code[0]
         if not tx["price_cents"]:
             return None, f"Has the code {tx['ref_code']}, but no price was entered for that plan."
-        if payment["amount_cents"] < tx["price_cents"]:
+        if tx["price_cents"] - payment["amount_cents"] >= SHORT_OK:
             return None, (f"Has the code {tx['ref_code']}, but is less than the "
                           f"{mailer.money(tx['price_cents'])} price.")
         return tx, None
@@ -269,7 +270,17 @@ def match(payment, waiting):
         return covered[0], None
     if len(covered) > 1:
         return None, f"{payment['payer'] or 'The payer'} has more than one waiting plan this payment could be for."
-    # 3. Less than the price: always the engineer's call.
+    # 3. A little less than the price (under $10 short): treated like the exact price.
+    near = [t for t in priced if 0 < t["price_cents"] - paid < SHORT_OK]
+    if len(near) == 1:
+        tx = near[0]
+        if not tx["client_name"] or names_match(tx["client_name"], payment["payer"]):
+            return tx, None
+        return None, (f"Close to the price of “{tx['title']}”, but the payer's name differs from "
+                      f"{tx['client_name']}.")
+    if len(near) > 1:
+        return None, "Could be the payment for more than one waiting plan."
+    # 4. $10 or more short: always the engineer's call.
     short = [t for t in theirs if t["price_cents"] > paid]
     if len(short) == 1:
         tx = short[0]
@@ -446,6 +457,9 @@ def check_inbox(settings=None, connect=None):
 def release(tx, payment, settings=None):
     """Mark the plan paid from a payment email and email the plans. Returns True if the plans were emailed."""
     who = f" from {payment['payer']}" if payment.get("payer") else ""
-    db.log(tx["id"], f"{payment['method']} payment of {mailer.money(payment['amount_cents'])}{who} found in your email")
+    missing = (tx.get("price_cents") or 0) - payment["amount_cents"]
+    short = f" ({mailer.money(missing)} less than the price)" if missing > 0 else ""
+    db.log(tx["id"], f"{payment['method']} payment of {mailer.money(payment['amount_cents'])}{who} found in your "
+                     f"email{short}")
     return sender.mark_paid(tx["id"], payment["method"], f"{payment['amount_cents'] / 100:.2f}", allow_short=True,
                             settings=settings)

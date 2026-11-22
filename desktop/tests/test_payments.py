@@ -601,8 +601,24 @@ def test_overpaying_with_two_plans_for_the_same_client_waits(env, inbox):
     assert "more than one waiting plan" in db.list_payments("review")[0]["note"]
 
 
-@pytest.mark.parametrize("amount", ["1,499.99", "1,495.00", "100.00"])
-def test_any_underpayment_waits_for_the_engineer(env, inbox, amount):
+@pytest.mark.parametrize("amount, short", [("1,499.99", "$0.01"), ("1,490.01", "$9.99")])
+def test_paying_a_little_less_still_sends_the_plans(env, inbox, amount, short):
+    tx_id = send(env)  # Jo Smith, $1,500.00
+    inbox.messages.append(payment_email("Zelle", subject="You received money with Zelle",
+                                        text=WELLS_FARGO_TEXT.replace("$1,500.00", f"${amount}")))
+    assert payments.check_inbox()["released"] == ["Lot 7 Grading"] and released(tx_id)
+    assert any(f"({short} less than the price)" in line for line in log_texts(tx_id))
+
+
+def test_a_little_less_with_two_plans_nearby_waits(env, inbox):
+    send(env)                                           # $1,500
+    send(env, price="1503", to_email="b@example.com")   # also within $10 of a $1,495 payment
+    inbox.messages.append(payment_email("Venmo", amount="1,495.00", payer="Jo Smith", note=""))
+    assert payments.check_inbox() == {"released": [], "review": 1}
+
+
+@pytest.mark.parametrize("amount", ["1,490.00", "1,400.00", "100.00"])
+def test_ten_dollars_or_more_short_waits_for_the_engineer(env, inbox, amount):
     tx_id = send(env)
     inbox.messages.append(payment_email("Zelle", subject="You received money with Zelle",
                                         text=WELLS_FARGO_TEXT.replace("$1,500.00", f"${amount}")))
