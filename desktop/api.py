@@ -132,7 +132,8 @@ def same_price(price):
     other = next((t for t in waiting if t["price_cents"] == cents), None)
     if not other:
         return None
-    free = next(c for c in range(cents + 1, cents + 10000) if c not in taken)
+    start = (cents // 100 + 1) * 100  # the next whole dollar up
+    free = next(c for c in range(start, start + 1000000, 100) if c not in taken)
     return {"other": other, "price": mailer.money(cents), "suggested": f"{free / 100:.2f}",
             "suggested_text": mailer.money(free)}
 

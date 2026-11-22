@@ -118,12 +118,12 @@ def test_send_page_offers_a_unique_price(env):
             "pdf_path": str(env["pdf"]), "client_name": "Al"}
     assert api.send(form)["ok"]
     r = api.send({**form, "to_email": "b@example.com"})
-    assert not r["ok"] and r["same_price"] and r["suggested"] == "1500.01" and r["suggested_text"] == "$1,500.01"
+    assert not r["ok"] and r["same_price"] and r["suggested"] == "1501.00" and r["suggested_text"] == "$1,501.00"
     assert "Lot 7 Grading" in r["error"] and "a@example.com" in r["error"]
     assert len(db.list_txs()) == 1  # nothing was sent
     assert api.send({**form, "to_email": "b@example.com", "price": r["suggested"]})["ok"]
     r = api.send({**form, "to_email": "c@example.com"})
-    assert r["suggested"] == "1500.02"  # .01 is taken now too
+    assert r["suggested"] == "1502.00"  # $1,501 is taken now too
     # Once a plan is paid its price is free again
     sender.mark_paid(db.list_txs()[-1]["id"], "Zelle")
     assert api.send({**form, "to_email": "c@example.com"})["ok"]
@@ -573,3 +573,38 @@ def test_custom_final_plans_email(env, inbox):
     t2 = send(env, price="900", to_email="b@example.com")
     sender.mark_paid(t2, "Venmo")
     assert env["smtp"].sent[-1]["Subject"] == "Plans: Lot 7 Grading"
+
+
+# ------------------------------------------------------------------ paying more or less than the price
+def test_overpaying_any_amount_releases_the_plans(env, inbox):
+    tx_id = send(env)  # Jo Smith, $1,500.00
+    inbox.messages.append(payment_email("Zelle", subject="You received money with Zelle",
+                                        text=WELLS_FARGO_TEXT.replace("$1,500.00", "$2,250.00")))
+    assert payments.check_inbox()["released"] == ["Lot 7 Grading"] and released(tx_id)
+    assert db.get_tx(tx_id)["amount_paid_cents"] == 225000
+
+
+def test_overpaying_needs_the_name(env, inbox):
+    send(env, client_name="")  # no client name: an overpayment can't be tied to this plan
+    inbox.messages.append(payment_email("Venmo", amount="1,600.00", payer="Jo Smith", note=""))
+    assert payments.check_inbox() == {"released": [], "review": 1}
+    send(env, price="900", to_email="b@example.com", client_name="Al Other")
+    inbox.messages.append(payment_email("Venmo", amount="5,000.00", payer="Somebody Else", note=""))
+    assert payments.check_inbox()["released"] == []  # a large payment from a stranger releases nothing
+
+
+def test_overpaying_with_two_plans_for_the_same_client_waits(env, inbox):
+    send(env)
+    send(env, price="900", to_email="b@example.com")  # also Jo Smith
+    inbox.messages.append(payment_email("Venmo", amount="2,000.00", payer="Jo Smith", note=""))
+    assert payments.check_inbox() == {"released": [], "review": 1}
+    assert "more than one waiting plan" in db.list_payments("review")[0]["note"]
+
+
+@pytest.mark.parametrize("amount", ["1,499.99", "1,495.00", "100.00"])
+def test_any_underpayment_waits_for_the_engineer(env, inbox, amount):
+    tx_id = send(env)
+    inbox.messages.append(payment_email("Zelle", subject="You received money with Zelle",
+                                        text=WELLS_FARGO_TEXT.replace("$1,500.00", f"${amount}")))
+    assert payments.check_inbox() == {"released": [], "review": 1} and db.get_tx(tx_id)["status"] == "sent"
+    assert "less than the $1,500.00 price" in db.list_payments("review")[0]["note"]

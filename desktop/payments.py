@@ -250,15 +250,32 @@ def match(payment, waiting):
         return None, "Mentions more than one plan code."
     if payment["codes"]:
         return None, "Has a plan code that isn't waiting for payment."
-    same = [t for t in waiting if t["price_cents"] and t["price_cents"] == payment["amount_cents"]]
+    paid = payment["amount_cents"]
+    priced = [t for t in waiting if t["price_cents"]]
+    # 1. Exactly the price: the one plan with that price (each unpaid plan's price is unique).
+    same = [t for t in priced if t["price_cents"] == paid]
     if len(same) == 1:
         tx = same[0]
         if not tx["client_name"] or names_match(tx["client_name"], payment["payer"]):
             return tx, None
         return None, f"Matches the price of “{tx['title']}”, but the payer's name differs from {tx['client_name']}."
     if len(same) > 1:
-        return None, "More than one waiting plan has this price, and there's no plan code."
-    return None, "No waiting plan has this price, and there's no plan code."
+        return None, "More than one waiting plan has this price."
+    # 2. More than the price: fine, as long as the payer's name points to exactly one plan it covers. The name is
+    #    required here, or any large payment from anyone could release someone else's plans.
+    theirs = [t for t in priced if t["client_name"] and names_match(t["client_name"], payment["payer"])]
+    covered = [t for t in theirs if t["price_cents"] < paid]
+    if len(covered) == 1:
+        return covered[0], None
+    if len(covered) > 1:
+        return None, f"{payment['payer'] or 'The payer'} has more than one waiting plan this payment could be for."
+    # 3. Less than the price: always the engineer's call.
+    short = [t for t in theirs if t["price_cents"] > paid]
+    if len(short) == 1:
+        tx = short[0]
+        return None, (f"Looks like the payment for “{tx['title']}”, but it's "
+                      f"{mailer.money(tx['price_cents'] - paid)} less than the {mailer.money(tx['price_cents'])} price.")
+    return None, "Doesn't match the price or client name of a waiting plan."
 
 
 # ------------------------------------------------------------------ inbox
