@@ -714,13 +714,21 @@ for (const kind of Object.keys(BOXES)) {
 }
 // A file dropped anywhere else must not open in the window.
 ["dragover", "drop"].forEach(t => document.addEventListener(t, (e) => e.preventDefault()));
-$("send-btn").addEventListener("click", async () => {
+$("send-btn").addEventListener("click", sendPlans);
+async function sendPlans() {
   const b = $("send-btn"); b.disabled = true; b.textContent = "Building preview and sending…";
   const r = await api.send({ from_email: $("f-from").value, to_email: $("f-to").value, client_name: $("f-name").value,
     title: $("f-title").value, price: $("f-price").value, pdf_path: chosen ? chosen.path : "", share_link: $("f-share").value,
     methods: [...document.querySelectorAll("#f-methods input:checked")].map(i => i.value),
     invoice_path: invoice ? invoice.path : "", subject: $("f-subject").value, message: $("f-message").value });
   b.disabled = false; b.textContent = "Send";
+  if (!r.ok && r.same_price) {
+    // Payments are matched by their exact amount, so each unpaid plan needs a price of its own.
+    if (await ask({ title: "Same price as another unpaid plan",
+        message: `${r.error} To tell the two payments apart, use ${r.suggested_text} for this one. Make sure the invoice shows the same amount.`,
+        ok: `Use ${r.suggested_text}`, icon: "$" })) { $("f-price").value = r.suggested; saveDraft(); return sendPlans(); }
+    return;
+  }
   if (!r.ok) { if (r.need_share_link) $("share-wrap").classList.remove("hidden"); return flash(r.error, "err"); }
   ["f-to", "f-name", "f-title", "f-price", "f-share", "f-subject", "f-message"].forEach(id => $(id).value = "");
   setFile("plan", null); setFile("invoice", null);  // also clears the saved draft
@@ -730,7 +738,7 @@ $("send-btn").addEventListener("click", async () => {
   const row = document.querySelector(`details.tx[data-id="${r.tx_id}"]`);
   if (row) { row.open = true; row.classList.add("new"); }
   flash(r.message);
-});
+}
 
 // ------------------------------------------------------------ transactions
 let txItems = [];

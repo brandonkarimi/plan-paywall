@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from desktop import background, config, db, payments
+from desktop import background, config, db, payments, sender
 from desktop.tests.test_desktop import attachments, body, log_texts, send
 
 
@@ -91,11 +91,39 @@ def released(tx_id):
     return tx["status"] == "paid" and bool(tx["delivered_at"])
 
 
-def test_preview_email_asks_for_the_code(env):
-    tx_id = send(env)
-    assert f"Please include PLN-{tx_id} in the Zelle memo or Venmo note." in body(env["smtp"].sent[-1])
-    send(env, methods=["venmo"], to_email="b@example.com")
-    assert "in the Venmo note." in body(env["smtp"].sent[-1])
+def test_preview_email_shows_the_amount_and_asks_for_no_memo(env):
+    send(env)
+    msg = env["smtp"].sent[-1]
+    text = body(msg)
+    assert "Amount due: $1,500.00" in text and "PLN-" not in text and "memo" not in text.lower()
+    assert "Amount due: <b>$1,500.00</b>" in msg.get_body(("html",)).get_content()
+    send(env, price="", to_email="b@example.com")
+    assert "Amount due" not in body(env["smtp"].sent[-1])
+
+
+def test_no_memo_exact_amount_and_name_release_the_plans(env, inbox):
+    tx_id = send(env)  # client "Jo Smith", $1,500.00
+    inbox.messages.append(payment_email("Zelle", payer="Jo Smith", note=""))
+    assert payments.check_inbox()["released"] == ["Lot 7 Grading"] and released(tx_id)
+
+
+def test_send_page_offers_a_unique_price(env):
+    from desktop.api import Api
+
+    api = Api()
+    form = {"from_email": "pat@acmecivil.test", "to_email": "a@example.com", "price": "1500",
+            "pdf_path": str(env["pdf"]), "client_name": "Al"}
+    assert api.send(form)["ok"]
+    r = api.send({**form, "to_email": "b@example.com"})
+    assert not r["ok"] and r["same_price"] and r["suggested"] == "1500.01" and r["suggested_text"] == "$1,500.01"
+    assert "Lot 7 Grading" in r["error"] and "a@example.com" in r["error"]
+    assert len(db.list_txs()) == 1  # nothing was sent
+    assert api.send({**form, "to_email": "b@example.com", "price": r["suggested"]})["ok"]
+    r = api.send({**form, "to_email": "c@example.com"})
+    assert r["suggested"] == "1500.02"  # .01 is taken now too
+    # Once a plan is paid its price is free again
+    sender.mark_paid(db.list_txs()[-1]["id"], "Zelle")
+    assert api.send({**form, "to_email": "c@example.com"})["ok"]
 
 
 def test_code_and_full_amount_release_the_plans(env, inbox):

@@ -118,6 +118,25 @@ def payment_summary(result):
     return " ".join(parts)
 
 
+def same_price(price):
+    """If another plan waiting for payment has exactly this price, that plan and the nearest free amount above it
+    (e.g. $1,500.01). Payments are matched by amount, so every unpaid plan needs its own. Else None."""
+    if not str(price or "").strip():
+        return None
+    try:
+        cents = sender._price_cents(price)
+    except sender.SendError:
+        return None  # the send itself reports the bad price
+    waiting = db.list_txs(["sent"])
+    taken = {t["price_cents"] for t in waiting if t["price_cents"]}
+    other = next((t for t in waiting if t["price_cents"] == cents), None)
+    if not other:
+        return None
+    free = next(c for c in range(cents + 1, cents + 10000) if c not in taken)
+    return {"other": other, "price": mailer.money(cents), "suggested": f"{free / 100:.2f}",
+            "suggested_text": mailer.money(free)}
+
+
 DRAFT_TEXT = ("from_email", "to_email", "client_name", "title", "price", "share_link", "subject", "message")
 
 
@@ -208,6 +227,12 @@ class Api:
         return pdf_details(result[0] if isinstance(result, (list, tuple)) else result, "Invoice")
 
     def send(self, form):
+        clash = same_price(form.get("price", ""))
+        if clash:
+            return _err(f"“{clash['other']['title']}” ({clash['other']['client_email']}) is also waiting for "
+                        f"{clash['price']}.", same_price=True, suggested=clash["suggested"],
+                        suggested_text=clash["suggested_text"], price_text=clash["price"],
+                        other=clash["other"]["title"])
         try:
             tx_id = sender.send_plans(
                 from_email=form.get("from_email", ""), to_email=form.get("to_email", ""),
