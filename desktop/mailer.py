@@ -293,9 +293,8 @@ def invite(tx, settings):
     pay = money(cents) if cents else "the invoice amount" if tx.get("invoice_path") else "payment"
     methods = tx.get("methods") or []
     paragraphs = message_paragraphs(message)
-    if cents:  # the exact amount is how the payment is matched to these plans, so make it easy to see
-        paragraphs.append({"text": [f"Amount due: {money(cents)}"],
-                           "html": f"<p style='margin:0 0 14px;font-size:17px'>Amount due: <b>{money(cents)}</b></p>"})
+    if tx.get("invoice_path"):
+        paragraphs.append("The full price details are in the attached invoice.")
     options = {}
     if "zelle" in methods:
         z = settings.get("zelle") or {}

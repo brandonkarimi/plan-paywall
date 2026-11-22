@@ -91,14 +91,17 @@ def released(tx_id):
     return tx["status"] == "paid" and bool(tx["delivered_at"])
 
 
-def test_preview_email_shows_the_amount_and_asks_for_no_memo(env):
-    send(env)
+def test_preview_email_points_to_the_invoice_and_asks_for_no_memo(env):
+    invoice = env["tmp"] / "invoice.pdf"
+    invoice.write_bytes(env["pdf"].read_bytes())
+    send(env, invoice_path=str(invoice))
     msg = env["smtp"].sent[-1]
     text = body(msg)
-    assert "Amount due: $1,500.00" in text and "PLN-" not in text and "memo" not in text.lower()
-    assert "Amount due: <b>$1,500.00</b>" in msg.get_body(("html",)).get_content()
-    send(env, price="", to_email="b@example.com")
-    assert "Amount due" not in body(env["smtp"].sent[-1])
+    assert "The full price details are in the attached invoice." in text
+    assert "Amount due" not in text and "PLN-" not in text and "memo" not in text.lower()
+    assert "The full price details are in the attached invoice." in msg.get_body(("html",)).get_content()
+    send(env, price="900", to_email="b@example.com")  # no invoice attached: nothing to point to
+    assert "attached invoice" not in body(env["smtp"].sent[-1])
 
 
 def test_no_memo_exact_amount_and_name_release_the_plans(env, inbox):
