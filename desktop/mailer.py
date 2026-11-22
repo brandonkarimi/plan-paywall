@@ -224,6 +224,19 @@ def _zelle_contact(qr_link):
 CARD_WIDTH = 236  # px; both cards share it, and two side by side fit the 600px message width
 
 
+def venmo_link(username, cents):
+    """Opens Venmo (the app on phones) ready to pay ``username``, with the exact price filled in when known,
+    so the amount matches the plan for automatic payments."""
+    from urllib.parse import quote
+
+    amount = f"&amount={cents / 100:.2f}" if cents else ""
+    return f"https://venmo.com/{quote(username)}?txn=pay{amount}"
+
+
+def _is_web_link(link):
+    return (link or "").lower().startswith(("https://", "http://"))
+
+
 def _qr_block(tx, settings):
     from desktop import images
 
@@ -234,27 +247,32 @@ def _qr_block(tx, settings):
             continue
         if method == "zelle":
             who = (settings.get("zelle") or {}).get("recipient", "").strip() or _zelle_contact(text)
+            link = text
         else:
             user = (settings.get("venmo") or {}).get("username", "").strip().lstrip("@")
             who = f"@{user}" if user else ""
-        cards.append((method, who, _qr_matrix(text)))
+            link = venmo_link(user, tx.get("price_cents")) if user else text
+        cards.append((method, who, _qr_matrix(text), link if _is_web_link(link) else ""))
     if not cards:
-        return None, set()
-    modules = max(len(m) for _, _, m in cards) + 6  # same size for every code
+        return None, set(), {}
+    modules = max(len(m) for _, _, m, _ in cards) + 6  # same size for every code
     cells = []
-    for i, (method, who, matrix) in enumerate(cards):
+    for i, (method, who, matrix, link) in enumerate(cards):
         label, color = QR_CARD[method]
         if i:
             cells.append("<td width=14 style='width:14px'></td>")
+        button = (f"<div style='margin:12px 0 0'><a href='{escape(link)}' style='background:{color};color:#fff;"
+                  "padding:9px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;"
+                  f"display:inline-block'>Pay with {label}</a></div>") if link else ""
         cells.append(
             f"<td width={CARD_WIDTH} valign=top style='width:{CARD_WIDTH}px;border:1px solid #e5e7eb;"
             "border-radius:12px;padding:14px 0;text-align:center;vertical-align:top'>"
             f"<div style='font-size:20px;font-weight:700;color:{color}'>{label}</div>"
             f"<div style='font-size:15px;font-weight:600;color:#16191d;margin:2px 0 10px'>{escape(who) or '&nbsp;'}</div>"
-            + qr_table(matrix, modules=modules) + "</td>")
+            + qr_table(matrix, modules=modules) + button + "</td>")
     html = ("<table role='presentation' cellpadding=0 cellspacing=0 style='margin:2px 0 18px;"
             "border-collapse:separate'><tr>" + "".join(cells) + "</tr></table>")
-    return {"html": html}, {method for method, _, _ in cards}
+    return {"html": html}, {method for method, _, _, _ in cards}, {m: link for m, _, _, link in cards if link}
 
 
 def fill(template, tx):
@@ -306,7 +324,7 @@ def invite(tx, settings):
     if "venmo" in methods:
         user = (settings.get("venmo") or {}).get("username", "").strip().lstrip("@")
         options["venmo"] = f"Venmo: send {pay} to @{user}" if user else f"Venmo: send {pay} using the QR code below"
-    qr, shown = _qr_block(tx, settings)
+    qr, shown, links = _qr_block(tx, settings)
 
     def how_to_pay(lines):
         if len(options) > 1 and lines:  # make it obvious the client only needs to use one of them
@@ -314,7 +332,8 @@ def invite(tx, settings):
         return lines
 
     # A QR card already shows who to pay, so its line is left out of the email; text-only mail apps still get it.
-    paragraphs.append({"text": how_to_pay(list(options.values())),
+    text_lines = [f"{o} ({links[m]})" if m in links else o for m, o in options.items()]
+    paragraphs.append({"text": how_to_pay(text_lines),
                        "html": how_to_pay([o for m, o in options.items() if m not in shown])})
     if qr:
         paragraphs.append(qr)

@@ -386,7 +386,12 @@ def test_qr_codes_are_drawn_into_the_email_not_attached(env):
     msg = env["smtp"].sent[-1]
     html = msg.get_body(("html",)).get_content()
     assert _scan_html_qr(html) == [ZELLE_LINK, VENMO_LINK]
-    assert "<a " not in html and "<img" not in html  # nothing to click, open or swipe through
+    assert "<img" not in html  # nothing to open or swipe through
+    # Each card has a button: Zelle opens its QR link, Venmo opens the app with the exact price filled in
+    assert f"href='{ZELLE_LINK}'" in html and ">Pay with Zelle</a>" in html
+    assert "href='https://venmo.com/AcmeCivil-Eng?txn=pay&amp;amount=100.00'" in html and ">Pay with Venmo</a>" in html
+    text = msg.get_body(("plain",)).get_content()
+    assert ZELLE_LINK in text and "https://venmo.com/AcmeCivil-Eng?txn=pay&amount=100.00" in text
     assert not [p for p in msg.walk() if p.get_content_maintype() == "image"]
     assert {a.get_content_type() for a in msg.iter_attachments()} == {"application/pdf"}
     assert len(html.encode()) < 90_000  # Gmail cuts off messages over ~100 KB
@@ -399,7 +404,8 @@ def test_only_the_chosen_methods_qr_code_is_shown(env):
     images.store("venmo_qr", _qr(env["tmp"] / "v.png", VENMO_LINK))
     sender.send_plans(from_email="pat@acmecivil.test", to_email="client@example.test", price="100",
                       pdf_path=env["pdf"], methods=["venmo"], settings=config.load_settings())
-    assert _scan_html_qr(env["smtp"].sent[-1].get_body(("html",)).get_content()) == [VENMO_LINK]
+    html = env["smtp"].sent[-1].get_body(("html",)).get_content()
+    assert _scan_html_qr(html) == [VENMO_LINK] and "Pay with Venmo" in html and "Pay with Zelle" not in html
 
 
 def test_no_qr_codes_without_pictures(env):
