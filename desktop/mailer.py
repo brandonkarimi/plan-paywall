@@ -222,6 +222,7 @@ def _zelle_contact(qr_link):
 
 
 CARD_WIDTH = 236  # px; both cards share it, and two side by side fit the 600px message width
+CARD_LOGO_HEIGHT = 36  # px; the logo shown small at the top of each payment card
 
 
 def venmo_link(username, cents):
@@ -256,6 +257,11 @@ def _qr_block(tx, settings):
     if not cards:
         return None, set(), {}
     modules = max(len(m) for _, _, m, _ in cards) + 6  # same size for every code
+    # The signature logo, small, on top of each card. It's the same picture as the signature's,
+    # so it travels in the email once however many cards show it.
+    logo = (f"<div style='margin:0 0 8px'><img src='cid:{SIGNATURE_LOGO_CID}' alt='' height={CARD_LOGO_HEIGHT} "
+            f"style='height:{CARD_LOGO_HEIGHT}px;width:auto;max-width:180px;border:0;display:inline-block'></div>"
+            ) if config.image_path("signature_logo") else ""
     cells = []
     for i, (method, who, matrix, link) in enumerate(cards):
         label, color = QR_CARD[method]
@@ -267,7 +273,7 @@ def _qr_block(tx, settings):
                   f"display:inline-block'>Pay with {label}</a></div>") if link else ""
         cells.append(
             f"<td width={CARD_WIDTH} valign=top style='width:{CARD_WIDTH}px;border:1px solid #e5e7eb;"
-            "border-radius:12px;padding:14px 0;text-align:center;vertical-align:top'>"
+            "border-radius:12px;padding:14px 0;text-align:center;vertical-align:top'>" + logo +
             f"<div style='font-size:20px;font-weight:700;color:{color}'>{label}</div>"
             f"<div style='font-size:15px;font-weight:600;color:#16191d;margin:2px 0 10px'>{escape(who) or '&nbsp;'}</div>"
             + qr_table(matrix, modules=modules) + button + "</td>")

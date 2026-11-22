@@ -219,6 +219,19 @@ def test_every_email_carries_the_signature_with_inline_logo(env):
         assert related.get_content_type() == "multipart/related"
         assert [p.get_content_type() for p in related.get_payload()] == ["multipart/alternative", "image/png"]
 
+    # The logo is also on top of each payment card, still sent only once
+    images.store("zelle_qr", _qr(env["tmp"] / "z.png", ZELLE_LINK))
+    images.store("venmo_qr", _qr(env["tmp"] / "v.png", VENMO_LINK))
+    env["smtp"].sent.clear()
+    send(env)
+    msg = env["smtp"].sent[0]
+    html = msg.get_body(("html",)).get_content()
+    assert html.count(f"cid:{mailer.SIGNATURE_LOGO_CID}") == 3  # Zelle card, Venmo card, signature
+    assert len([p for p in msg.walk() if p.get("Content-ID") == f"<{mailer.SIGNATURE_LOGO_CID}>"]) == 1
+    assert _scan_html_qr(html) == [ZELLE_LINK, VENMO_LINK]
+    images.remove("zelle_qr")
+    images.remove("venmo_qr")
+
     images.remove("signature_logo")
     env["smtp"].sent.clear()
     send(env)
