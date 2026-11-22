@@ -45,7 +45,8 @@ DEFAULT_SETTINGS = {
     "signature": {"name": "", "license": "", "phone": "", "email": "", "street": "", "city": ""},
     "zelle": {"enabled": False, "recipient": "", "name": ""},   # email/phone clients send to + name shown in Zelle
     "venmo": {"enabled": False, "username": ""},
-    "emails": dict(EMAIL_DEFAULTS),  # the engineer's default subjects and messages (Settings)
+    # The engineer's own default subjects and messages (Settings); empty means the built-in wording.
+    "emails": {k: "" for k in EMAIL_DEFAULTS},
     # Automatic payments: the inbox(es) that get the Wells Fargo (Zelle) and Venmo payment emails; an empty Venmo
     # email means the same inbox as Zelle. Passwords live in Windows Credential Manager as "imap:<email>".
     "auto_payments": {"enabled": False, "zelle": {"email": ""}, "venmo": {"email": ""}},
@@ -130,6 +131,9 @@ def load_settings() -> dict:
                     settings[k] = {**DEFAULT_SETTINGS[k], **v} if isinstance(DEFAULT_SETTINGS[k], dict) else v
         except (OSError, ValueError):
             pass
+    # Wording saved by an earlier version may just be the built-in text; show those boxes empty.
+    settings["emails"] = {k: "" if (v or "").strip() == EMAIL_DEFAULTS.get(k) else v
+                          for k, v in settings["emails"].items()}
     return settings
 
 

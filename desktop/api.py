@@ -387,9 +387,8 @@ class Api:
             error = self._set_auto_payments(settings, payload["auto_payments"] or {})
             if error:
                 return _err(error)
-        if "emails" in payload:  # an emptied box goes back to the built-in wording
-            settings["emails"] = {k: str(payload["emails"].get(k) or "").strip() or v
-                                  for k, v in config.EMAIL_DEFAULTS.items()}
+        if "emails" in payload:  # an empty box means the built-in wording
+            settings["emails"] = {k: str(payload["emails"].get(k) or "").strip() for k in config.EMAIL_DEFAULTS}
         if "signature" in payload:
             settings["signature"] = {k: str(v).strip() for k, v in payload["signature"].items()}
         for field in ("zelle", "venmo"):

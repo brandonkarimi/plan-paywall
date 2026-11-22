@@ -620,9 +620,21 @@ def test_saved_default_wording_is_used_when_the_send_boxes_are_empty(env):
     sender.mark_paid(tx_id, "Zelle")
     assert env["smtp"].sent[-1]["Subject"] == "Paid - Lot 7 Grading"
     assert body(env["smtp"].sent[-1]).startswith("Thanks Jo Smith. Final set attached.")
-    # An emptied box goes back to the original wording
+    # Emptied boxes stay empty in Settings, and the original wording is sent
     api.save_settings({"emails": {"preview_subject": "", "preview_body": "", "final_subject": "", "final_body": ""}})
-    assert config.load_settings()["emails"] == config.EMAIL_DEFAULTS
+    assert set(config.load_settings()["emails"].values()) == {""}
+    send(env)
+    assert env["smtp"].sent[-1]["Subject"] == "Preview: Lot 7 Grading"
+
+
+def test_settings_wording_boxes_start_empty(env):
+    assert set(config.load_settings()["emails"].values()) == {""}
+    # Built-in wording saved by the previous version shows as empty too
+    settings = config.load_settings()
+    settings["emails"] = dict(config.EMAIL_DEFAULTS, final_subject="Paid - {project}")
+    config.save_settings(settings)
+    assert config.load_settings()["emails"] == {"preview_subject": "", "preview_body": "",
+                                                "final_subject": "Paid - {project}", "final_body": ""}
 
 
 def test_final_email_with_download_link_has_button(env):
