@@ -231,7 +231,11 @@
           <label for="f-title">Project name</label>
           <input id="f-title" type="text">
         </div>
-        <div class="full">
+        <div>
+          <label for="f-price">Price</label>
+          <input id="f-price" type="text" inputmode="decimal" placeholder="1500.00">
+        </div>
+        <div>
           <label>Client can pay by</label>
           <div id="f-methods" class="methods"></div>
         </div>
@@ -281,6 +285,7 @@
         <div><b id="t-waiting">$0.00</b><span>waiting on payment</span></div>
       </div>
       <p class="small muted" id="t-methods" style="margin:0 0 10px"></p>
+      <div id="review"></div>
       <div class="toolbar">
         <div class="search">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -359,6 +364,17 @@
         <div><label>City, state, ZIP</label><input id="g-city" type="text" placeholder="Springfield CA 90000"></div>
         <div class="full" data-picture="signature_logo" data-wide="1"></div>
         <div class="full"><label>Preview</label><div class="sig-preview" id="sig-preview"></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Automatic payments</h2>
+      <label class="check"><input type="checkbox" id="p-on">Send plans automatically when a Zelle or Venmo payment arrives</label>
+      <div class="grid" id="p-fields" style="margin-top:12px">
+        <div><label for="p-email">Email that gets your payment alerts</label><input id="p-email" type="email" placeholder="you@gmail.com"></div>
+        <div><label for="p-pass">App password</label><input id="p-pass" type="password" autocomplete="off"></div>
+        <div><label for="p-host">Incoming mail server</label><input id="p-host" type="text" placeholder="imap.gmail.com"></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn ghost" id="p-check" type="button">Check for payments now</button></div>
       </div>
     </div>
 
@@ -539,6 +555,10 @@ async function loadState() {
         if (!await ask({ title: "Remove email account?", message: `${a.email} will no longer be available as a From address. Its saved password is deleted too.`, ok: "Remove", tone: "danger", icon: "!" })) return;
         await api.remove_account(a.email); loadState(); } }, "Remove")))));
   renderPictures();
+  const ap = s.auto_payments || {};
+  $("p-on").checked = !!ap.enabled; $("p-email").value = ap.email || ""; $("p-host").value = ap.host || "";
+  $("p-pass").value = ""; $("p-pass").placeholder = ap.has_password ? "Saved" : "";
+  $("p-fields").classList.toggle("hidden", !ap.enabled);
   const sig = s.signature || {};
   SIG_FIELDS.forEach(k => $("g-" + k).value = sig[k] || "");
   updateSigPreview();
@@ -587,6 +607,22 @@ $("a-save").addEventListener("click", async () => {
   ["a-email", "a-name", "a-pass", "a-host"].forEach(id => $(id).value = "");
   $("acct-add").open = false; await loadState(); flash("Email account saved. Use “Send test email” to check it works.");
 });
+$("p-on").addEventListener("change", () => $("p-fields").classList.toggle("hidden", !$("p-on").checked));
+$("p-email").addEventListener("change", () => {
+  const domain = ($("p-email").value.split("@")[1] || "").toLowerCase();
+  if (!$("p-host").value && domain) $("p-host").value = domain === "gmail.com" ? "imap.gmail.com" : "imap." + domain;
+});
+$("p-check").addEventListener("click", async (e) => {
+  e.target.disabled = true; e.target.textContent = "Checking…";
+  const r = await api.check_payments_now();
+  e.target.disabled = false; e.target.textContent = "Check for payments now";
+  flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err");
+});
+// Called by the app when the background check found something.
+function paymentsFound(message) {
+  flash(message);
+  if (!$("tab-tx").classList.contains("hidden")) loadTransactions();
+}
 $("settings-save").addEventListener("click", async () => {
   const firstRun = state.setup_needed;
   const b = $("settings-save"); b.disabled = true;
@@ -594,6 +630,7 @@ $("settings-save").addEventListener("click", async () => {
     zelle: { enabled: $("m-zelle").checked, recipient: $("m-zelle-to").value, name: $("m-zelle-name").value },
     venmo: { enabled: $("m-venmo").checked, username: $("m-venmo-user").value },
     signature: sigValues(),
+    auto_payments: { enabled: $("p-on").checked, email: $("p-email").value, password: $("p-pass").value, host: $("p-host").value },
   });
   b.disabled = false;
   if (!r.ok) return flash(r.error, "err");
@@ -647,12 +684,12 @@ for (const kind of Object.keys(BOXES)) {
 $("send-btn").addEventListener("click", async () => {
   const b = $("send-btn"); b.disabled = true; b.textContent = "Building preview and sending…";
   const r = await api.send({ from_email: $("f-from").value, to_email: $("f-to").value, client_name: $("f-name").value,
-    title: $("f-title").value, pdf_path: chosen ? chosen.path : "", share_link: $("f-share").value,
+    title: $("f-title").value, price: $("f-price").value, pdf_path: chosen ? chosen.path : "", share_link: $("f-share").value,
     methods: [...document.querySelectorAll("#f-methods input:checked")].map(i => i.value),
     invoice_path: invoice ? invoice.path : "", subject: $("f-subject").value, message: $("f-message").value });
   b.disabled = false; b.textContent = "Send";
   if (!r.ok) { if (r.need_share_link) $("share-wrap").classList.remove("hidden"); return flash(r.error, "err"); }
-  ["f-to", "f-name", "f-title", "f-share", "f-subject", "f-message"].forEach(id => $(id).value = "");
+  ["f-to", "f-name", "f-title", "f-price", "f-share", "f-subject", "f-message"].forEach(id => $(id).value = "");
   setFile("plan", null); setFile("invoice", null);
   // Jump to the log with the new send opened, so it's obvious where it went.
   $("tx-search").value = "";
@@ -676,8 +713,28 @@ async function loadTransactions() {
   $("t-collected").textContent = data.totals.collected; $("t-waiting").textContent = data.totals.waiting;
   $("t-methods").textContent = data.totals.by_method.length ? "Received: " + data.totals.by_method.join(" · ") : "";
   txItems = data.items;
+  renderReview(data.review, data.waiting);
   $("reset-btn").classList.toggle("hidden", !txItems.length);
   renderTransactions();
+}
+function renderReview(items, waiting) {
+  const box = $("review"); box.replaceChildren();
+  for (const p of items) {
+    const pick = el("select", { style: "width:auto;max-width:100%" },
+      el("option", { value: "" }, "Choose the plan it's for…"), waiting.map(w => el("option", { value: w.id }, w.label)));
+    box.append(el("div", { class: "notice warn review" },
+      el("div", {}, el("b", {}, `${p.method} payment found: ${p.amount}${p.payer ? " from " + p.payer : ""}`),
+        el("span", { class: "small" }, ` · ${p.when}${p.memo ? " · “" + p.memo + "”" : ""}`)),
+      el("div", { class: "small", style: "margin:2px 0 8px" }, p.note),
+      el("div", { class: "actions" }, pick,
+        el("button", { class: "btn money small", onclick: async (e) => {
+          if (!pick.value) return flash("Choose the plan this payment is for.", "err");
+          e.target.disabled = true;
+          const r = await api.confirm_payment(p.id, pick.value);
+          e.target.disabled = false;
+          flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err"); loadTransactions(); } }, "Send plans"),
+        el("button", { class: "btn ghost", onclick: async () => { await api.dismiss_payment(p.id); loadTransactions(); } }, "Not a plan payment"))));
+  }
 }
 function renderTransactions() {
   const words = $("tx-search").value.toLowerCase().split(/\s+/).filter(Boolean);
@@ -737,6 +794,7 @@ function renderTransactions() {
         el("dl", { class: "facts" },
           el("dt", {}, "Client"), el("dd", {}, t.client_name ? `${t.client_name} (${t.client_email})` : t.client_email),
           el("dt", {}, "Amount"), el("dd", {}, t.price === "On invoice" ? "Shown on the invoice" : t.price),
+          el("dt", {}, "Payment code"), el("dd", {}, t.ref_code || "-"),
           el("dt", {}, "Can pay by"), el("dd", {}, t.pay_by_text || "-"),
           el("dt", {}, "Sent from"), el("dd", {}, t.from_email),
           el("dt", {}, "Plans"), el("dd", {}, t.plans_text + (t.has_invoice ? ", with invoice" : ""))),

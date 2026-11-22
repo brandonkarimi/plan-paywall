@@ -7,7 +7,7 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
-from desktop import config, db, images, mailer, sender
+from desktop import config, db, images, mailer, payments, sender
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +23,9 @@ def _err(exc_or_msg, **kw):
 def public_settings(settings=None):
     settings = settings or config.load_settings()
     accounts = [{**a, "has_password": bool(config.smtp_password(a["email"]))} for a in settings["accounts"]]
-    return {**settings, "accounts": accounts, "enabled_methods": config.enabled_methods(settings)}
+    auto = settings.get("auto_payments") or {}
+    auto = {**auto, "has_password": bool(auto.get("email") and payments.inbox_password(auto))}
+    return {**settings, "accounts": accounts, "auto_payments": auto, "enabled_methods": config.enabled_methods(settings)}
 
 
 # Older versions wrote more technical log lines; show them in today's plain wording.
@@ -98,6 +100,22 @@ def pdf_details(path, label=""):
                too_big=info["size_bytes"] > config.ATTACH_LIMIT_BYTES)
 
 
+def payment_view(p):
+    when = datetime.fromisoformat(p["received_at"]).astimezone() if p.get("received_at") else None
+    return {"id": p["id"], "method": p["method"], "amount": mailer.money(p["amount_cents"]), "payer": p["payer"],
+            "memo": p["memo"], "note": p["note"], "when": f"{when:%b %d, %I:%M %p}" if when else ""}
+
+
+def payment_summary(result):
+    parts = []
+    if result.get("released"):
+        parts.append("Payment received: plans sent for " + ", ".join(f"“{t}”" for t in result["released"]) + ".")
+    if result.get("review"):
+        n = result["review"]
+        parts.append(f"{n} payment{'s' if n != 1 else ''} found that need{'s' if n == 1 else ''} your OK in Transactions.")
+    return " ".join(parts)
+
+
 class Api:
     def __init__(self):
         self._window = None
@@ -122,6 +140,10 @@ class Api:
             by_method[m] = by_method.get(m, 0) + (t["amount_paid_cents"] or t["price_cents"])
         return {
             "items": [transaction_view(t) for t in txs],
+            "review": [payment_view(p) for p in db.list_payments("review")],
+            "waiting": [{"id": t["id"], "label": f"{t['ref_code']} · {t['title']} · {t['client_email']}"
+                         + (f" · {mailer.money(t['price_cents'])}" if t["price_cents"] else "")}
+                        for t in txs if t["status"] == "sent"],
             "totals": {
                 "sent": len(txs), "paid": len(paid),
                 "collected": mailer.money(sum(t["amount_paid_cents"] or t["price_cents"] for t in paid)),
@@ -166,6 +188,63 @@ class Api:
             return _err(f"Unexpected error: {exc}")
         tx = db.get_tx(tx_id)
         return _ok(tx_id=tx_id, message=f"Sent to {tx['client_email']}. Click Mark as paid once their payment arrives.")
+
+    # ------------------------------------------------------------ automatic payments
+    def _set_auto_payments(self, settings, data):
+        """Validate and store the payment-email inbox. Returns an error message, or "" when saved."""
+        address = (data.get("email") or "").strip().lower()
+        enabled = bool(data.get("enabled"))
+        if not enabled and not address:
+            settings["auto_payments"] = {**settings["auto_payments"], "enabled": False}
+            return ""
+        if not sender.EMAIL_RE.match(address):
+            return "Enter the email address that gets your Zelle and Venmo payment emails."
+        acct = {"enabled": enabled, "email": address,
+                "host": (data.get("host") or "").strip() or payments.imap_host_for(address), "port": 993}
+        password = (data.get("password") or "").replace(" ", "")
+        if enabled:
+            if not payments.inbox_password({**acct, "password": password}):
+                return f"Enter the app password for {address}."
+            try:
+                payments.test_login({**acct, "password": password})
+            except payments.InboxError as exc:
+                return str(exc)
+        if password:  # saved only once it works (or when turned off)
+            config.set_secret(f"imap:{address}", password)
+        settings["auto_payments"] = acct
+        return ""
+
+    def check_payments_now(self):
+        try:
+            result = payments.check_inbox()
+        except payments.InboxError as exc:
+            return _err(exc)
+        except Exception as exc:
+            log.exception("Payment check failed")
+            return _err(f"Couldn't check for payments: {exc}")
+        return _ok(message=payment_summary(result) or "No new payments found.", **result)
+
+    def confirm_payment(self, payment_id, tx_id):
+        """The engineer says which plan a found payment is for: mark it paid and email the plans."""
+        payment = db.get_payment(int(payment_id))
+        tx = db.get_tx(int(tx_id)) if tx_id else None
+        if not payment or payment["status"] != "review":
+            return _err("That payment was already handled.")
+        if not tx or tx["status"] != "sent":
+            return _err("Choose a plan that's waiting for payment.")
+        try:
+            delivered = payments.release(tx, payment)
+        except sender.SendError as exc:
+            return _err(exc)
+        db.update_payment(payment["id"], status="confirmed", tx_id=tx["id"])
+        if delivered:
+            return _ok(message=f"Marked paid. The final plans were emailed to {tx['client_email']}.")
+        return _err(f"Marked paid, but the plans couldn't be emailed: {db.get_tx(tx['id'])['delivery_error']}. "
+                    "Use Resend.")
+
+    def dismiss_payment(self, payment_id):
+        db.update_payment(int(payment_id), status="dismissed")
+        return _ok()
 
     def mark_paid(self, tx_id, method, amount="", allow_short=False):
         try:
@@ -237,6 +316,10 @@ class Api:
     # ------------------------------------------------------------ settings
     def save_settings(self, payload):
         settings = config.load_settings()
+        if "auto_payments" in payload:
+            error = self._set_auto_payments(settings, payload["auto_payments"] or {})
+            if error:
+                return _err(error)
         if "signature" in payload:
             settings["signature"] = {k: str(v).strip() for k, v in payload["signature"].items()}
         for field in ("zelle", "venmo"):

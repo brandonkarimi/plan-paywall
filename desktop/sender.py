@@ -61,7 +61,7 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
 
     methods: "zelle" and/or "venmo" (default: every method enabled in Settings).
     invoice_path: optional invoice PDF, attached to the email as-is.
-    price: optional (the app fills it in from the invoice total when it can read one); 0 = not known.
+    price: optional; needed for payments to be matched automatically. 0 = not entered.
     subject, message: the preview email's wording for this send ("" = the defaults from Settings).
     """
     settings = settings or config.load_settings()

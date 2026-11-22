@@ -316,6 +316,11 @@ def invite(tx, settings):
     # A QR card already shows who to pay, so its line is left out of the email; text-only mail apps still get it.
     paragraphs.append({"text": how_to_pay(list(options.values())),
                        "html": how_to_pay([o for m, o in options.items() if m not in shown])})
+    ref = tx.get("ref_code") or ""
+    if ref and options:  # lets the app match the payment to this plan automatically
+        where = {("zelle",): "Zelle memo", ("venmo",): "Venmo note"}.get(tuple(options), "Zelle memo or Venmo note")
+        paragraphs.append({"text": [f"Please include {ref} in the {where}."],
+                           "html": f"<p style='margin:0 0 14px'>Please include <b>{escape(ref)}</b> in the {where}.</p>"})
     if qr:
         paragraphs.append(qr)
     text, html = _wrap(paragraphs, settings)

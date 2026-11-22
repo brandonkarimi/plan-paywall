@@ -47,6 +47,20 @@ CREATE TABLE IF NOT EXISTS activity (
     text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS activity_tx ON activity(tx_id, id);
+-- Payment emails found in the engineer's inbox (each processed once).
+CREATE TABLE IF NOT EXISTS payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id TEXT NOT NULL UNIQUE,
+    found_at TEXT NOT NULL,
+    received_at TEXT NOT NULL DEFAULT '',
+    method TEXT NOT NULL DEFAULT '',          -- Zelle | Venmo
+    amount_cents INTEGER NOT NULL DEFAULT 0,
+    payer TEXT NOT NULL DEFAULT '',
+    memo TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,                     -- released | review | confirmed | dismissed | ignored (not a payment)
+    tx_id INTEGER,
+    note TEXT NOT NULL DEFAULT ''             -- why it needs the engineer's confirmation
+);
 """
 
 # Columns added after the first release; older databases get them on startup.
@@ -159,3 +173,34 @@ def activity(tx_id):
     with connect() as c:
         return [dict(r) for r in c.execute(
             "SELECT ts, text FROM activity WHERE tx_id = ? ORDER BY id DESC", [tx_id]).fetchall()]
+
+
+# ------------------------------------------------------------------ payments found in the inbox
+def payment_seen(message_id) -> bool:
+    with connect() as c:
+        return c.execute("SELECT 1 FROM payments WHERE message_id = ?", [message_id]).fetchone() is not None
+
+
+def add_payment(**fields) -> int:
+    fields = {"found_at": now(), **fields}
+    cols = ", ".join(fields)
+    with connect() as c:
+        return c.execute(f"INSERT INTO payments ({cols}) VALUES ({', '.join('?' for _ in fields)})",
+                         list(fields.values())).lastrowid
+
+
+def update_payment(payment_id, **fields):
+    sets = ", ".join(f"{k} = ?" for k in fields)
+    with connect() as c:
+        c.execute(f"UPDATE payments SET {sets} WHERE id = ?", [*fields.values(), payment_id])
+
+
+def get_payment(payment_id):
+    with connect() as c:
+        r = c.execute("SELECT * FROM payments WHERE id = ?", [payment_id]).fetchone()
+        return dict(r) if r else None
+
+
+def list_payments(status):
+    with connect() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM payments WHERE status = ? ORDER BY id DESC", [status])]

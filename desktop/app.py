@@ -2,6 +2,7 @@
 import ctypes
 import logging
 import shutil
+import threading
 import sys
 from pathlib import Path
 
@@ -55,6 +56,33 @@ def wire_drops(window):
         logging.getLogger(__name__).exception("Couldn't set up drag and drop")
 
 
+CHECK_EVERY = 120  # seconds between looks at the inbox for payment emails
+
+
+def watch_payments(window):
+    """While the app is open, look for Zelle/Venmo payment emails at start-up and then every few minutes, and tell
+    the page when plans were sent or a payment needs confirming."""
+    import json
+    import time
+
+    from desktop import payments
+    from desktop.api import payment_summary
+
+    log = logging.getLogger("desktop.payments")
+    time.sleep(5)
+    while True:
+        try:
+            result = payments.check_inbox()
+            if result["released"] or result["review"]:
+                log.info("Payment check: %s", result)
+                window.evaluate_js(f"paymentsFound({json.dumps(payment_summary(result))})")
+        except payments.InboxError as exc:
+            log.warning("Payment check: %s", exc)
+        except Exception:
+            log.exception("Payment check failed")
+        time.sleep(CHECK_EVERY)
+
+
 def main():
     logging.basicConfig(filename=config.log_path(), level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -67,6 +95,7 @@ def main():
                                    width=1040, height=820, min_size=(760, 600))
     api._attach(window)
     window.events.loaded += lambda *_: wire_drops(window)
+    threading.Thread(target=watch_payments, args=(window,), daemon=True).start()
     storage = config.data_dir() / "webview"
     clear_page_cache(storage)
     webview.start(private_mode=False, storage_path=str(storage))
