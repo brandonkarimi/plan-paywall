@@ -502,7 +502,7 @@ def test_update_re_reads_wells_fargo_emails_skipped_by_test_versions(env):
     import sqlite3
 
     db.add_payment(message_id="<skipped@wf>", status="ignored")
-    db.add_payment(message_id="<handled@wf>", status="review", note="x")
+    db.add_payment(message_id="<handled@wf>", status="released", tx_id=1)
     db.set_inbox_state("pat@gmail.test", "1", 500)
     with sqlite3.connect(config.db_path()) as c:
         c.execute("PRAGMA user_version = 0")
@@ -512,3 +512,45 @@ def test_update_re_reads_wells_fargo_emails_skipped_by_test_versions(env):
     db.add_payment(message_id="<later@wf>", status="ignored")
     db.init()  # only once
     assert db.payment_seen("<later@wf>")
+
+
+@pytest.mark.parametrize("client, payer, same", [
+    ("Donovan Karimi", "DONOVAN KARIMI", True),
+    ("DonovAnkarimi", "DONOVAN KARIMI", True),       # spaces typed differently
+    ("Mc Donald", "McDonald Homes", True),
+    ("Smith, John", "John Smith", True),
+    ("Smith", "John A. Smith", True),
+    ("Jon Smyth", "John Smith", True),              # small typo
+    ("Karimy", "DONOVAN KARIMI", True),
+    ("Jo Smith", "JO SMITH", True),
+    ("ABC Construction", "XYZ Construction LLC", False),  # only a generic word in common
+    ("Johnny", "Jonathan Smith", False),             # nicknames still need the engineer's OK
+    ("Maria Lopez", "Mark Lopes Garcia", True),     # "Lopez"~"Lopes": one letter
+    ("Maria Lopez", "Mark Jones", False),
+    ("Al Lee", "Bo Lin", False),                    # short words must match exactly
+    ("Construction LLC", "Construction LLC", False),  # nothing but generic words
+], ids=lambda v: str(v))
+def test_names_match(client, payer, same):
+    assert payments.names_match(client, payer) is same
+
+
+def test_odd_client_name_now_released_automatically(env, inbox):
+    tx_id = send(env, client_name="JoSmith")
+    inbox.messages.append(payment_email("Zelle", subject="You received money with Zelle", text=WELLS_FARGO_TEXT))
+    assert payments.check_inbox()["released"] == ["Lot 7 Grading"] and released(tx_id)
+
+
+def test_update_rechecks_payments_waiting_for_ok(env, inbox):
+    import sqlite3
+
+    tx_id = send(env, client_name="JoSmith")
+    inbox.messages.append(payment_email("Zelle", subject="You received money with Zelle", text=WELLS_FARGO_TEXT))
+    msg_id = inbox.messages[-1]["Message-ID"]
+    db.add_payment(message_id=msg_id, method="Zelle", amount_cents=150000, payer="JO SMITH", status="review",
+                   note="name differs (old rules)")
+    db.set_inbox_state("pat@gmail.test", "7", 99)
+    with sqlite3.connect(config.db_path()) as c:
+        c.execute("PRAGMA user_version = 1")
+    db.init()
+    assert db.list_payments("review") == []
+    assert payments.check_inbox()["released"] == ["Lot 7 Grading"] and released(tx_id)

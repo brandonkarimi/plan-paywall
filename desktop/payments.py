@@ -174,12 +174,54 @@ def parse_payment(msg, method):
 
 
 # ------------------------------------------------------------------ matching
-def _words(name):
-    return {w for w in re.findall(r"[a-z]+", (name or "").lower()) if len(w) > 1}
+# Words that say nothing about who someone is, so sharing one isn't a match ("ABC Construction" ≠ "XYZ Construction").
+GENERIC_WORDS = {
+    "llc", "inc", "co", "corp", "corporation", "company", "ltd", "pc", "pllc", "lp", "llp", "dba", "the", "and", "of",
+    "construction", "constructions", "builders", "building", "build", "group", "services", "service", "enterprises",
+    "holdings", "development", "developers", "homes", "properties", "property", "contracting", "contractors",
+    "contractor", "engineering", "design", "designs", "investments", "realty", "management",
+    "mr", "mrs", "ms", "dr", "jr", "sr", "ii", "iii",
+}
+
+
+def _name_words(name):
+    return [w for w in re.findall(r"[a-z]+", (name or "").lower()) if w not in GENERIC_WORDS]
+
+
+def _typos(a, b):
+    """How many single-letter changes turn one word into the other (edit distance)."""
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _nearly(a, b):
+    """Same word allowing small typos: 1 wrong letter in a short word, 2 in a longer one (none in very short ones)."""
+    if a == b:
+        return True
+    if min(len(a), len(b)) < 4:
+        return False
+    return _typos(a, b) <= (1 if max(len(a), len(b)) <= 6 else 2)
 
 
 def names_match(client_name, payer):
-    return bool(_words(client_name) & _words(payer))
+    """Do these look like the same person/company? Ignores capitals, punctuation, word order, spaces, generic words
+    (LLC, Construction…) and small typos. One shared name word is enough ("Smith" ~ "John A. Smith")."""
+    client, paid = _name_words(client_name), _name_words(payer)
+    if not client or not paid:
+        return False
+    if any(_nearly(a, b) for a in client if len(a) > 1 for b in paid if len(b) > 1):
+        return True
+    # Spaces typed differently: "DonovAnkarimi" ~ "DONOVAN KARIMI", "Mc Donald" ~ "McDonald"
+    joined_client, joined_paid = "".join(client), "".join(paid)
+    shorter = min(joined_client, joined_paid, key=len)
+    if len(shorter) >= 4 and (joined_client in joined_paid or joined_paid in joined_client):
+        return True
+    return len(shorter) >= 6 and _typos(joined_client, joined_paid) <= 2
 
 
 def _before(payment, sent_at):

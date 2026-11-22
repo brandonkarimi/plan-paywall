@@ -110,6 +110,12 @@ def init():
             c.execute("DELETE FROM payments WHERE status = 'ignored'")
             c.execute("DELETE FROM inbox_state")
             c.execute("PRAGMA user_version = 1")
+        if c.execute("PRAGMA user_version").fetchone()[0] < 2:
+            # Name matching became more forgiving (spaces, small typos). Look again at payments still waiting for
+            # the engineer's OK: re-reading the inbox matches them under the new rules (or lists them again).
+            c.execute("DELETE FROM payments WHERE status = 'review'")
+            c.execute("DELETE FROM inbox_state")
+            c.execute("PRAGMA user_version = 2")
 
 
 def _row(r):
