@@ -51,6 +51,28 @@ def imap_host_for(address):
     return IMAP_HOSTS.get(domain, f"imap.{domain}")
 
 
+def auto_settings(settings):
+    """The automatic-payments settings, tidied: {"enabled", "zelle": {"email"}, "venmo": {"email"}}."""
+    auto = settings.get("auto_payments") or {}
+    zelle = (auto.get("zelle") or {}).get("email") or auto.get("email") or ""  # "email": the 1.3.0 test version
+    venmo = (auto.get("venmo") or {}).get("email") or ""
+    return {"enabled": bool(auto.get("enabled")), "zelle": {"email": zelle.strip().lower()},
+            "venmo": {"email": venmo.strip().lower()}}
+
+
+def inboxes(auto):
+    """The inboxes to read: [{"email", "host", "methods"}]. Without its own email, Venmo uses the Zelle inbox;
+    one address used for both is read once."""
+    zelle = auto["zelle"]["email"]
+    venmo = auto["venmo"]["email"] or zelle
+    found = {}
+    for method, address in (("Zelle", zelle), ("Venmo", venmo)):
+        if address:
+            box = found.setdefault(address, {"email": address, "host": imap_host_for(address), "methods": []})
+            box["methods"].append(method)
+    return list(found.values())
+
+
 def inbox_password(acct):
     """The saved inbox password; if the inbox is also a sending account, its (app) password works too."""
     email_addr = (acct.get("email") or "").lower()
@@ -181,7 +203,7 @@ def match(payment, waiting):
 
 # ------------------------------------------------------------------ inbox
 def _fetch(acct, since, connect=None):
-    """Trusted payment emails since ``since``: [(method, message)]."""
+    """Emails from Wells Fargo / Venmo (only those this inbox is used for) since ``since``."""
     password = inbox_password(acct)
     if not password:
         raise InboxError(f"No password saved for {acct['email']}.")
@@ -199,6 +221,8 @@ def _fetch(acct, since, connect=None):
         conn.select("INBOX", readonly=True)
         found = []
         for method, domains in SOURCES.items():
+            if method not in acct.get("methods", SOURCES):
+                continue
             for domain in domains:
                 status, data = conn.uid("SEARCH", None, "SINCE", since.strftime("%d-%b-%Y"), "FROM", domain)
                 if status != "OK" or not data or not data[0]:
@@ -223,11 +247,13 @@ def test_login(acct, connect=None):
 
 def check_inbox(settings=None, connect=None):
     """Look for new payments and release plans that are clearly paid.
-    Returns {"released": [tx titles], "review": count of new payments to confirm}."""
+    Returns {"released": [tx titles], "review": count of new payments to confirm}, plus "errors" (inboxes that
+    couldn't be read) when there were any."""
     settings = settings or config.load_settings()
-    acct = settings.get("auto_payments") or {}
+    auto = auto_settings(settings)
+    boxes = inboxes(auto)
     result = {"released": [], "review": 0}
-    if not acct.get("enabled") or not acct.get("email"):
+    if not auto["enabled"] or not boxes:
         return result
     with _lock:
         waiting = db.list_txs(["sent"])
@@ -235,7 +261,15 @@ def check_inbox(settings=None, connect=None):
             return result
         oldest = min(datetime.fromisoformat(t["sent_at"]) for t in waiting if t.get("sent_at"))
         since = max(oldest, datetime.now(timezone.utc) - LOOKBACK_LIMIT) - timedelta(days=1)
-        for msg in _fetch(acct, since, connect):
+        messages, errors = [], []
+        for box in boxes:
+            try:
+                messages += _fetch(box, since, connect)
+            except InboxError as exc:
+                errors.append(str(exc))
+        if errors:
+            result["errors"] = errors
+        for msg in messages:
             method = trusted_method(msg)
             message_id = str(msg.get("Message-ID", "")).strip()
             if not method or not message_id or db.payment_seen(message_id):

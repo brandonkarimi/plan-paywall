@@ -371,10 +371,11 @@
       <h2>Automatic payments</h2>
       <label class="check"><input type="checkbox" id="p-on">Send plans automatically when a Zelle or Venmo payment arrives</label>
       <div class="grid" id="p-fields" style="margin-top:12px">
-        <div><label for="p-email">Email that gets your payment alerts</label><input id="p-email" type="email" placeholder="you@gmail.com"></div>
-        <div><label for="p-pass">App password</label><input id="p-pass" type="password" autocomplete="off"></div>
-        <div><label for="p-host">Incoming mail server</label><input id="p-host" type="text" placeholder="imap.gmail.com"></div>
-        <div style="display:flex;align-items:flex-end"><button class="btn ghost" id="p-check" type="button">Check for payments now</button></div>
+        <div><label for="p-zelle-email">Zelle alerts email</label><input id="p-zelle-email" type="email" placeholder="you@gmail.com"></div>
+        <div><label for="p-zelle-pass">App password</label><input id="p-zelle-pass" type="password" autocomplete="off"></div>
+        <div><label for="p-venmo-email">Venmo alerts email</label><input id="p-venmo-email" type="email" placeholder="Same as Zelle"></div>
+        <div id="p-venmo-pass-wrap"><label for="p-venmo-pass">App password</label><input id="p-venmo-pass" type="password" autocomplete="off"></div>
+        <div class="full"><button class="btn ghost" id="p-check" type="button">Check for payments now</button></div>
       </div>
     </div>
 
@@ -556,9 +557,12 @@ async function loadState() {
         await api.remove_account(a.email); loadState(); } }, "Remove")))));
   renderPictures();
   const ap = s.auto_payments || {};
-  $("p-on").checked = !!ap.enabled; $("p-email").value = ap.email || ""; $("p-host").value = ap.host || "";
-  $("p-pass").value = ""; $("p-pass").placeholder = ap.has_password ? "Saved" : "";
-  $("p-fields").classList.toggle("hidden", !ap.enabled);
+  $("p-on").checked = !!ap.enabled;
+  for (const k of ["zelle", "venmo"]) {
+    const part = ap[k] || {};
+    $(`p-${k}-email`).value = part.email || ""; $(`p-${k}-pass`).value = ""; $(`p-${k}-pass`).placeholder = part.has_password ? "Saved" : "";
+  }
+  $("p-fields").classList.toggle("hidden", !ap.enabled); venmoInboxChanged();
   const sig = s.signature || {};
   SIG_FIELDS.forEach(k => $("g-" + k).value = sig[k] || "");
   updateSigPreview();
@@ -608,10 +612,12 @@ $("a-save").addEventListener("click", async () => {
   $("acct-add").open = false; await loadState(); flash("Email account saved. Use “Send test email” to check it works.");
 });
 $("p-on").addEventListener("change", () => $("p-fields").classList.toggle("hidden", !$("p-on").checked));
-$("p-email").addEventListener("change", () => {
-  const domain = ($("p-email").value.split("@")[1] || "").toLowerCase();
-  if (!$("p-host").value && domain) $("p-host").value = domain === "gmail.com" ? "imap.gmail.com" : "imap." + domain;
-});
+// A separate Venmo inbox needs its own password; the same one as Zelle (or none) doesn't.
+function venmoInboxChanged() {
+  const v = $("p-venmo-email").value.trim().toLowerCase();
+  $("p-venmo-pass-wrap").classList.toggle("hidden", !v || v === $("p-zelle-email").value.trim().toLowerCase());
+}
+["p-zelle-email", "p-venmo-email"].forEach(id => $(id).addEventListener("input", venmoInboxChanged));
 $("p-check").addEventListener("click", async (e) => {
   e.target.disabled = true; e.target.textContent = "Checking…";
   const r = await api.check_payments_now();
@@ -630,7 +636,9 @@ $("settings-save").addEventListener("click", async () => {
     zelle: { enabled: $("m-zelle").checked, recipient: $("m-zelle-to").value, name: $("m-zelle-name").value },
     venmo: { enabled: $("m-venmo").checked, username: $("m-venmo-user").value },
     signature: sigValues(),
-    auto_payments: { enabled: $("p-on").checked, email: $("p-email").value, password: $("p-pass").value, host: $("p-host").value },
+    auto_payments: { enabled: $("p-on").checked,
+      zelle: { email: $("p-zelle-email").value, password: $("p-zelle-pass").value },
+      venmo: { email: $("p-venmo-email").value, password: $("p-venmo-pass").value } },
   });
   b.disabled = false;
   if (!r.ok) return flash(r.error, "err");

@@ -44,9 +44,9 @@ DEFAULT_SETTINGS = {
     "signature": {"name": "", "firm": "", "license": "", "phone": "", "email": "", "street": "", "city": ""},
     "zelle": {"enabled": False, "recipient": "", "name": ""},   # email/phone clients send to + name shown in Zelle
     "venmo": {"enabled": False, "username": ""},
-    # Automatic payments: the inbox that gets the Wells Fargo (Zelle) and Venmo payment emails.
-    # Its password lives in Windows Credential Manager as "imap:<email>".
-    "auto_payments": {"enabled": False, "email": "", "host": "", "port": 993},
+    # Automatic payments: the inbox(es) that get the Wells Fargo (Zelle) and Venmo payment emails; an empty Venmo
+    # email means the same inbox as Zelle. Passwords live in Windows Credential Manager as "imap:<email>".
+    "auto_payments": {"enabled": False, "zelle": {"email": ""}, "venmo": {"email": ""}},
     "preview_dpi": 100,
     "seal_box": "",
     "theme": "light",        # "light" (blue and white) or "dark"

@@ -73,6 +73,8 @@ def watch_payments(window):
     while True:
         try:
             result = payments.check_inbox()
+            for error in result.get("errors", []):
+                log.warning("Payment check: %s", error)
             if result["released"] or result["review"]:
                 log.info("Payment check: %s", result)
                 window.evaluate_js(f"paymentsFound({json.dumps(payment_summary(result))})")

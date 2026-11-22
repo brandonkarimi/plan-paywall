@@ -30,16 +30,23 @@ def payment_email(method="Venmo", amount="1,500.00", payer="Jo Smith", note="PLN
 
 
 class FakeIMAP:
-    messages = []
+    messages = []        # the main inbox (pat@gmail.test)
+    others = {}          # other inboxes: {address: [messages]}
     password_ok = True
+    bad_logins = set()   # addresses whose password is wrong
+    searched = []        # (inbox, domain) searches made
 
     def __init__(self, host, port, ssl_context=None):
         self.host = host
 
     def login(self, user, password):
         import imaplib
-        if not FakeIMAP.password_ok:
+        if not FakeIMAP.password_ok or user in FakeIMAP.bad_logins:
             raise imaplib.IMAP4.error("AUTHENTICATIONFAILED")
+        self.user = user
+
+    def _box(self):
+        return FakeIMAP.others.get(self.user, FakeIMAP.messages)
 
     def select(self, box, readonly=False):
         return "OK", [b"1"]
@@ -47,9 +54,10 @@ class FakeIMAP:
     def uid(self, command, *args):
         if command == "SEARCH":
             domain = args[-1]
-            ids = [str(i + 1).encode() for i, m in enumerate(FakeIMAP.messages) if domain in m["From"]]
+            FakeIMAP.searched.append((self.user, domain))
+            ids = [str(i + 1).encode() for i, m in enumerate(self._box()) if domain in m["From"]]
             return "OK", [b" ".join(ids)]
-        raw = FakeIMAP.messages[int(args[0]) - 1].as_bytes()
+        raw = self._box()[int(args[0]) - 1].as_bytes()
         return "OK", [(b"1 (BODY[] {%d}" % len(raw), raw), b")"]
 
     def logout(self):
@@ -58,11 +66,11 @@ class FakeIMAP:
 
 @pytest.fixture
 def inbox(env, monkeypatch):
-    FakeIMAP.messages = []
+    FakeIMAP.messages, FakeIMAP.others, FakeIMAP.bad_logins, FakeIMAP.searched = [], {}, set(), []
     FakeIMAP.password_ok = True
     monkeypatch.setattr("imaplib.IMAP4_SSL", FakeIMAP)
     settings = config.load_settings()
-    settings["auto_payments"] = {"enabled": True, "email": "pat@gmail.test", "host": "imap.gmail.com", "port": 993}
+    settings["auto_payments"] = {"enabled": True, "zelle": {"email": "pat@gmail.test"}, "venmo": {"email": ""}}
     config.save_settings(settings)
     config.set_secret("imap:pat@gmail.test", "app-password")
     return FakeIMAP
@@ -205,13 +213,69 @@ def test_settings_check_the_inbox_login(env, inbox):
 
     api = Api()
     inbox.password_ok = False
-    r = api.save_settings({"auto_payments": {"enabled": True, "email": "pat@gmail.test", "password": "wrong"}})
+    r = api.save_settings({"auto_payments": {"enabled": True, "zelle": {"email": "pat@gmail.test", "password": "wrong"}}})
     assert not r["ok"] and "app password" in r["error"]
     assert config.get_secret("imap:pat@gmail.test") == "app-password"  # the wrong one wasn't saved
     inbox.password_ok = True
-    r = api.save_settings({"auto_payments": {"enabled": True, "email": "pat@gmail.test", "password": "abcd efgh"}})
+    r = api.save_settings({"auto_payments": {"enabled": True,
+                                             "zelle": {"email": "Pat@Gmail.test", "password": "abcd efgh"}}})
     assert r["ok"] and config.get_secret("imap:pat@gmail.test") == "abcdefgh"
     auto = r["state"]["settings"]["auto_payments"]
-    assert auto["enabled"] and auto["host"] == "imap.gmail.test" and auto["has_password"] and "password" not in auto
-    assert api.save_settings({"auto_payments": {"enabled": False, "email": ""}})["ok"]
+    assert auto["enabled"] and auto["zelle"]["email"] == "pat@gmail.test" and auto["venmo"]["email"] == ""
+    assert auto["zelle"]["has_password"] and auto["venmo"]["has_password"]  # Venmo uses the same inbox
+    assert "password" not in auto["zelle"]
+    assert api.save_settings({"auto_payments": {"enabled": False}})["ok"]
     assert not config.load_settings()["auto_payments"]["enabled"]
+    r = api.save_settings({"auto_payments": {"enabled": True}})
+    assert not r["ok"] and "Enter the email" in r["error"]
+
+
+def test_separate_venmo_inbox(env, inbox):
+    from desktop.api import Api
+
+    api = Api()
+    inbox.bad_logins = {"venmo@yahoo.test"}
+    r = api.save_settings({"auto_payments": {"enabled": True, "zelle": {"email": "pat@gmail.test"},
+                                             "venmo": {"email": "venmo@yahoo.test", "password": "nope"}}})
+    assert not r["ok"] and "venmo@yahoo.test" in r["error"] and not config.get_secret("imap:venmo@yahoo.test")
+    inbox.bad_logins = set()
+    r = api.save_settings({"auto_payments": {"enabled": True, "zelle": {"email": "pat@gmail.test"},
+                                             "venmo": {"email": "venmo@yahoo.test", "password": "yes"}}})
+    assert r["ok"] and config.get_secret("imap:venmo@yahoo.test") == "yes"
+
+    t1 = send(env)
+    t2 = send(env, to_email="b@example.com", price="900")
+    inbox.messages.append(payment_email("Zelle", note=f"PLN-{t1}"))
+    inbox.others["venmo@yahoo.test"] = [payment_email("Venmo", amount="900.00", note=f"PLN-{t2}")]
+    inbox.searched.clear()
+    assert sorted(payments.check_inbox()["released"]) == ["Lot 7 Grading", "Lot 7 Grading"]
+    assert released(t1) and released(t2)
+    assert db.get_tx(t1)["paid_method"] == "Zelle" and db.get_tx(t2)["paid_method"] == "Venmo"
+    # Each inbox is only searched for the alerts that go there.
+    assert set(inbox.searched) == {("pat@gmail.test", "wellsfargo.com"), ("venmo@yahoo.test", "venmo.com")}
+
+
+def test_one_inbox_failing_doesnt_stop_the_other(env, inbox):
+    from desktop.api import Api
+
+    settings = config.load_settings()
+    settings["auto_payments"]["venmo"] = {"email": "venmo@yahoo.test"}
+    config.save_settings(settings)
+    config.set_secret("imap:venmo@yahoo.test", "pw")
+    inbox.bad_logins = {"venmo@yahoo.test"}
+    tx_id = send(env)
+    inbox.messages.append(payment_email("Zelle", note=f"PLN-{tx_id}"))
+    result = payments.check_inbox()
+    assert result["released"] == ["Lot 7 Grading"] and "venmo@yahoo.test" in result["errors"][0]
+    send(env, to_email="b@example.com")  # something still waiting, so the inboxes are read again
+    r = Api().check_payments_now()
+    assert not r["ok"] and "venmo@yahoo.test" in r["error"]
+
+
+def test_settings_from_the_test_version_still_work(env, inbox):
+    settings = config.load_settings()
+    settings["auto_payments"] = {"enabled": True, "email": "pat@gmail.test", "host": "imap.gmail.com", "port": 993}
+    config.save_settings(settings)
+    tx_id = send(env)
+    inbox.messages.append(payment_email("Venmo", note=f"PLN-{tx_id}"))
+    assert payments.check_inbox()["released"] == ["Lot 7 Grading"]

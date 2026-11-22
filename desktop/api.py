@@ -23,8 +23,10 @@ def _err(exc_or_msg, **kw):
 def public_settings(settings=None):
     settings = settings or config.load_settings()
     accounts = [{**a, "has_password": bool(config.smtp_password(a["email"]))} for a in settings["accounts"]]
-    auto = settings.get("auto_payments") or {}
-    auto = {**auto, "has_password": bool(auto.get("email") and payments.inbox_password(auto))}
+    auto = payments.auto_settings(settings)
+    for key in ("zelle", "venmo"):
+        address = auto[key]["email"] or (auto["zelle"]["email"] if key == "venmo" else "")
+        auto[key]["has_password"] = bool(address and payments.inbox_password({"email": address}))
     return {**settings, "accounts": accounts, "auto_payments": auto, "enabled_methods": config.enabled_methods(settings)}
 
 
@@ -191,27 +193,38 @@ class Api:
 
     # ------------------------------------------------------------ automatic payments
     def _set_auto_payments(self, settings, data):
-        """Validate and store the payment-email inbox. Returns an error message, or "" when saved."""
-        address = (data.get("email") or "").strip().lower()
+        """Validate and store the payment-alert inbox(es). Returns an error message, or "" when saved."""
         enabled = bool(data.get("enabled"))
-        if not enabled and not address:
-            settings["auto_payments"] = {**settings["auto_payments"], "enabled": False}
-            return ""
-        if not sender.EMAIL_RE.match(address):
-            return "Enter the email address that gets your Zelle and Venmo payment emails."
-        acct = {"enabled": enabled, "email": address,
-                "host": (data.get("host") or "").strip() or payments.imap_host_for(address), "port": 993}
-        password = (data.get("password") or "").replace(" ", "")
-        if enabled:
-            if not payments.inbox_password({**acct, "password": password}):
-                return f"Enter the app password for {address}."
-            try:
-                payments.test_login({**acct, "password": password})
-            except payments.InboxError as exc:
-                return str(exc)
-        if password:  # saved only once it works (or when turned off)
+        typed = {}
+        for key, label in (("zelle", "Zelle"), ("venmo", "Venmo")):
+            part = data.get(key) or {}
+            address = (part.get("email") or "").strip().lower()
+            if address and not sender.EMAIL_RE.match(address):
+                return f"Check the {label} alerts email address."
+            typed[key] = {"email": address, "password": (part.get("password") or "").replace(" ", "")}
+        auto = {"enabled": enabled, "zelle": {"email": typed["zelle"]["email"]},
+                "venmo": {"email": typed["venmo"]["email"]}}
+        boxes = payments.inboxes(auto)
+        if enabled and not boxes:
+            return "Enter the email that gets your Zelle or Venmo payment alerts."
+        # A password typed next to an email belongs to that inbox (Venmo's row, left blank, means the Zelle inbox).
+        where = {"zelle": typed["zelle"]["email"], "venmo": typed["venmo"]["email"] or typed["zelle"]["email"]}
+        new_passwords = {}
+        for box in boxes:
+            password = next((typed[k]["password"] for k in ("zelle", "venmo")
+                             if typed[k]["password"] and where[k] == box["email"]), "")
+            if enabled:
+                if not payments.inbox_password({**box, "password": password}):
+                    return f"Enter the app password for {box['email']}."
+                try:
+                    payments.test_login({**box, "password": password})
+                except payments.InboxError as exc:
+                    return str(exc)
+            if password:
+                new_passwords[box["email"]] = password
+        for address, password in new_passwords.items():  # saved only once every inbox works
             config.set_secret(f"imap:{address}", password)
-        settings["auto_payments"] = acct
+        settings["auto_payments"] = auto
         return ""
 
     def check_payments_now(self):
@@ -222,7 +235,10 @@ class Api:
         except Exception as exc:
             log.exception("Payment check failed")
             return _err(f"Couldn't check for payments: {exc}")
-        return _ok(message=payment_summary(result) or "No new payments found.", **result)
+        message = payment_summary(result) or "No new payments found."
+        if result.get("errors"):
+            return _err(" ".join(result["errors"]) + (f" {message}" if result["released"] or result["review"] else ""))
+        return _ok(message=message, **result)
 
     def confirm_payment(self, payment_id, tx_id):
         """The engineer says which plan a found payment is for: mark it paid and email the plans."""
