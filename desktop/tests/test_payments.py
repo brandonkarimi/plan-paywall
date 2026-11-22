@@ -463,3 +463,52 @@ def test_checker_loads_no_window_or_pdf_code():
             "print(sorted(m for m in ('webview', 'pypdfium2', 'PIL', 'pypdf', 'img2pdf') if m in sys.modules))")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.strip()
     assert out == "[]"
+
+
+# ------------------------------------------------------------------ real Wells Fargo wording
+WELLS_FARGO_TEXT = """Wells Fargo Alert
+96
+JO SMITH sent you $1,500.00
+Date: 11/21/2026
+Confirmation: WFCT00TEST00
+We deposited the money into your Wells Fargo account ending in ...0000.
+Go to accounts
+Have any questions? Please contact us .
+WellsFargo.com
+Enrollment with Zelle through Wells Fargo Online is required. Terms and conditions apply. To send or receive money \
+with Zelle, both parties must have an eligible checking or savings account enrolled with Zelle through their bank. \
+Transactions between enrolled users typically occur in minutes. Neither Wells Fargo nor Zelle offers purchase \
+protection for payments made with Zelle - for example, if you do not receive the item you paid for. Payment requests \
+must be sent to enrolled Zelle users. Account fees (e.g., monthly service, overdraft) may apply.
+Please do not reply to this automated email."""
+
+
+def test_real_wells_fargo_zelle_email(env, inbox):
+    tx_id = send(env)  # Jo Smith, $1,500.00
+    inbox.messages.append(payment_email("Zelle", subject="You received money with Zelle", text=WELLS_FARGO_TEXT))
+    assert payments.check_inbox()["released"] == ["Lot 7 Grading"] and released(tx_id)
+    assert "Zelle payment of $1,500.00 from JO SMITH found in your email" in log_texts(tx_id)
+
+
+def test_other_wells_fargo_zelle_emails_are_not_payments(env, inbox):
+    send(env)
+    for subject in ("You sent money with Zelle", "Zelle payment request", "Your scheduled Zelle payment"):
+        inbox.messages.append(payment_email("Zelle", subject=subject, text=WELLS_FARGO_TEXT.replace(
+            "JO SMITH sent you", "You sent JO SMITH")))
+    assert payments.check_inbox() == {"released": [], "review": 0}
+
+
+def test_update_re_reads_wells_fargo_emails_skipped_by_test_versions(env):
+    import sqlite3
+
+    db.add_payment(message_id="<skipped@wf>", status="ignored")
+    db.add_payment(message_id="<handled@wf>", status="review", note="x")
+    db.set_inbox_state("pat@gmail.test", "1", 500)
+    with sqlite3.connect(config.db_path()) as c:
+        c.execute("PRAGMA user_version = 0")
+    db.init()
+    assert not db.payment_seen("<skipped@wf>") and db.payment_seen("<handled@wf>")
+    assert db.inbox_state("pat@gmail.test") is None
+    db.add_payment(message_id="<later@wf>", status="ignored")
+    db.init()  # only once
+    assert db.payment_seen("<later@wf>")

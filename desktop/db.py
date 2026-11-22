@@ -104,6 +104,12 @@ def init():
         for name, ddl in UPGRADE_COLUMNS.items():
             if name not in existing:
                 c.execute(f"ALTER TABLE transactions ADD COLUMN {name} {ddl}")
+        if c.execute("PRAGMA user_version").fetchone()[0] < 1:
+            # Test versions up to 1.3.0-beta.7 wrongly skipped every Wells Fargo Zelle email (its fine print mentions
+            # "payment requests"). Forget those skips and re-read the inbox so the payments get matched after all.
+            c.execute("DELETE FROM payments WHERE status = 'ignored'")
+            c.execute("DELETE FROM inbox_state")
+            c.execute("PRAGMA user_version = 1")
 
 
 def _row(r):

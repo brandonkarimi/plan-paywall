@@ -131,26 +131,34 @@ def parse_payment(msg, method):
     text = _text(msg)
     everything = f"{subject}\n{text}"
     low = everything.lower()
+    amount_text = None
     if method == "Venmo":
         m = re.search(r"^(.*?)\s+paid you\s+\$", subject, re.IGNORECASE)
         if not m:  # not a payment received (requests, "You paid ...", statements, ...)
             return None
         payer = m.group(1)
     else:
-        if "zelle" not in low or not re.search(r"received|sent you|deposited", low):
+        # Wells Fargo: subject "You received money with Zelle", body "DONOVAN KARIMI sent you $15.00". What kind of
+        # email it is comes from the subject: the fine print of every Zelle email mentions "payment requests".
+        sent_you = re.search(r"^([A-Za-z][\w .,'&-]{0,60}?)\s+(?:sent|has sent) you\s+\$\s?([\d,]+(?:\.\d{2})?)",
+                             text, re.MULTILINE)
+        if "zelle" not in low:
             return None
-        if re.search(r"you sent|request(ed)? (money|from)|payment request", low):
+        if re.search(r"\byou sent\b|request|scheduled|cancel|declin|fail|return", subject, re.IGNORECASE):
             return None
-        payer = ""
-        for pattern in (r"from\s+([A-Za-z][\w .,'&-]{1,60}?)(?:\s+(?:with|via|on|has|sent|for)\b|[.\n(]|$)",
-                        r"([A-Za-z][\w .,'&-]{1,60}?)\s+(?:sent|has sent) you\b"):
-            m = re.search(pattern, everything)
-            if m:
-                payer = m.group(1).strip(" .,")
-                break
-    amount = AMOUNT_RE.search(subject) or AMOUNT_RE.search(text)
-    if not amount:
-        return None
+        if not re.search(r"received|deposited", subject, re.IGNORECASE) and not sent_you:
+            return None
+        payer = sent_you.group(1).strip(" .,") if sent_you else ""
+        if not payer:
+            m = re.search(r"from\s+([A-Za-z][\w .,'&-]{1,60}?)(?:\s+(?:with|via|on|has|sent|for)\b|[.\n(]|$)", text)
+            payer = m.group(1).strip(" .,") if m else ""
+        if sent_you:  # the amount on that line, not some other figure further down
+            amount_text = sent_you.group(2)
+    if amount_text is None:
+        found = AMOUNT_RE.search(subject) or AMOUNT_RE.search(text)
+        if not found:
+            return None
+        amount_text = found.group(1)
     memo = ""
     m = re.search(r"(?:memo|note|message)\s*[:\-]\s*(.+)", text, re.IGNORECASE)
     if m:
@@ -160,7 +168,7 @@ def parse_payment(msg, method):
     except (TypeError, ValueError):
         received = datetime.now(timezone.utc)
     codes = {int(c) for c in CODE_RE.findall(everything)}
-    return {"method": method, "amount_cents": _cents(amount.group(1)), "payer": payer[:120], "memo": memo,
+    return {"method": method, "amount_cents": _cents(amount_text), "payer": payer[:120], "memo": memo,
             "codes": codes, "received_at": received.isoformat(timespec="seconds"),
             "message_id": str(msg.get("Message-ID", "")).strip()}
 
