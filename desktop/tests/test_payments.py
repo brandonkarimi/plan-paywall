@@ -35,8 +35,10 @@ class FakeIMAP:
     password_ok = True
     bad_logins = set()   # addresses whose password is wrong
     searched = []        # (inbox, domain) searches made
+    fetched = []         # (inbox, uid) messages downloaded
+    capabilities = ("IMAP4REV1", "IDLE")
 
-    def __init__(self, host, port, ssl_context=None):
+    def __init__(self, host, port, ssl_context=None, timeout=None):
         self.host = host
 
     def login(self, user, password):
@@ -51,12 +53,19 @@ class FakeIMAP:
     def select(self, box, readonly=False):
         return "OK", [b"1"]
 
+    def response(self, code):
+        return code, [b"7"]  # UIDVALIDITY
+
     def uid(self, command, *args):
         if command == "SEARCH":
             domain = args[-1]
             FakeIMAP.searched.append((self.user, domain))
-            ids = [str(i + 1).encode() for i, m in enumerate(self._box()) if domain in m["From"]]
+            low = 1
+            if args[1] == "UID":  # UID n:* — like real servers, the newest message always matches
+                low = min(int(args[2].split(":")[0]), len(self._box()))
+            ids = [str(i + 1).encode() for i, m in enumerate(self._box()) if i + 1 >= low and domain in m["From"]]
             return "OK", [b" ".join(ids)]
+        FakeIMAP.fetched.append((self.user, int(args[0])))
         raw = self._box()[int(args[0]) - 1].as_bytes()
         return "OK", [(b"1 (BODY[] {%d}" % len(raw), raw), b")"]
 
@@ -67,6 +76,7 @@ class FakeIMAP:
 @pytest.fixture
 def inbox(env, monkeypatch):
     FakeIMAP.messages, FakeIMAP.others, FakeIMAP.bad_logins, FakeIMAP.searched = [], {}, set(), []
+    FakeIMAP.fetched = []
     FakeIMAP.password_ok = True
     monkeypatch.setattr("imaplib.IMAP4_SSL", FakeIMAP)
     settings = config.load_settings()
@@ -327,3 +337,101 @@ def test_window_hears_about_payments_found_by_the_checker(env, inbox):
 def test_background_command():
     cmd = background.command()
     assert cmd[-1] == "--background" and cmd[-2].endswith("run_desktop.py")
+
+
+# ------------------------------------------------------------------ fast and light
+def test_only_new_mail_is_downloaded(env, inbox):
+    tx_id = send(env)
+    inbox.messages.append(payment_email("Venmo", payer="Unknown", amount="5.00", note="lunch"))  # not a plan payment
+    payments.check_inbox()
+    assert inbox.fetched == [("pat@gmail.test", 1)]
+    inbox.fetched.clear()
+    payments.check_inbox()
+    assert inbox.fetched == []  # nothing new: nothing downloaded
+    inbox.messages.append(payment_email("Venmo", note=f"PLN-{tx_id}"))
+    assert payments.check_inbox()["released"] == ["Lot 7 Grading"]
+    assert inbox.fetched == [("pat@gmail.test", 2)]
+
+
+def test_payments_from_before_the_plans_were_sent_are_ignored(env, inbox):
+    send(env)
+    inbox.messages.append(payment_email("Venmo", payer="Old Client", amount="300.00", note="",
+                                        when=datetime.now(timezone.utc) - timedelta(days=1)))
+    assert payments.check_inbox() == {"released": [], "review": 0}  # not shown for review either
+
+
+class FakeSocket:
+    def pending(self):
+        return 0
+
+
+class IdleConn:
+    """Enough of an IMAP connection to test waiting for new mail."""
+
+    def __init__(self, lines):
+        self.lines, self.sent = list(lines), []
+
+    def _new_tag(self):
+        return b"A1"
+
+    def send(self, data):
+        self.sent.append(data)
+
+    def readline(self):
+        return self.lines.pop(0) if self.lines else b""
+
+    def socket(self):
+        return FakeSocket()
+
+
+def test_wait_for_mail(monkeypatch):
+    import threading
+
+    monkeypatch.setattr(payments, "_readable", lambda sock, timeout: True)
+    conn = IdleConn([b"+ idling\r\n", b"* 1 RECENT\r\n", b"* 8 EXISTS\r\n", b"A1 OK IDLE done\r\n"])
+    assert payments.wait_for_mail(conn, threading.Event()) is True
+    assert conn.sent == [b"A1 IDLE\r\n", b"DONE\r\n"]
+    # No new mail before the renew time: ends the wait cleanly and says so
+    monkeypatch.setattr(payments, "_readable", lambda sock, timeout: False)
+    conn = IdleConn([b"+ idling\r\n", b"A1 OK IDLE done\r\n"])
+    assert payments.wait_for_mail(conn, threading.Event(), renew=0) is False
+    # A dropped connection is reported (the watcher reconnects)
+    monkeypatch.setattr(payments, "_readable", lambda sock, timeout: True)
+    with pytest.raises(payments.InboxError):
+        payments.wait_for_mail(IdleConn([b"+ idling\r\n"]), threading.Event())
+
+
+def test_watcher_wakes_the_checker_on_connect_and_new_mail(env, inbox, monkeypatch):
+    import threading
+
+    mail = threading.Event()  # the test "delivers" new mail by setting this
+
+    def fake_wait(conn, stop):
+        while not stop.is_set():
+            if mail.wait(0.05):
+                mail.clear()
+                return True
+        return False
+
+    monkeypatch.setattr(payments, "wait_for_mail", fake_wait)
+    wake = threading.Event()
+    watchers = {}
+    box = payments.inboxes(payments.auto_settings(config.load_settings()))[0]
+    background.sync_watchers(watchers, {box["email"]: box}, wake)
+    assert wake.wait(5)  # connected: check once
+    wake.clear()
+    assert not wake.wait(0.3)  # quiet while no mail arrives
+    mail.set()
+    assert wake.wait(5)  # new mail: check now
+    background.sync_watchers(watchers, {}, wake)  # nothing waiting any more: watchers stop
+    assert watchers == {}
+
+
+def test_checker_loads_no_window_or_pdf_code():
+    import subprocess
+    import sys
+
+    code = ("import sys, desktop.background; "
+            "print(sorted(m for m in ('webview', 'pypdfium2', 'PIL', 'pypdf', 'img2pdf') if m in sys.modules))")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.strip()
+    assert out == "[]"

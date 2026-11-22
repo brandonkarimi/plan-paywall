@@ -25,10 +25,10 @@ def unblock_bundled_files():
 
 unblock_bundled_files()
 
-from desktop.app import main, run_background  # noqa: E402  (must come after the unblock)
-
 if __name__ == "__main__":
-    if "--background" in sys.argv:  # the hidden payment checker that starts with Windows
-        run_background()
+    if "--background" in sys.argv:  # the hidden payment checker that starts with Windows (no window code loaded)
+        from desktop.background import main as background_main
+        background_main()
     else:
+        from desktop.app import main  # must come after the unblock
         main()

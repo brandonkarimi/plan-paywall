@@ -61,6 +61,12 @@ CREATE TABLE IF NOT EXISTS payments (
     tx_id INTEGER,
     note TEXT NOT NULL DEFAULT ''             -- why it needs the engineer's confirmation
 );
+-- How far each payment-alert inbox has been read (IMAP UIDs), so only new mail is downloaded.
+CREATE TABLE IF NOT EXISTS inbox_state (
+    email TEXT PRIMARY KEY,
+    uidvalidity TEXT NOT NULL DEFAULT '',
+    last_uid INTEGER NOT NULL DEFAULT 0
+);
 """
 
 # Columns added after the first release; older databases get them on startup.
@@ -214,3 +220,15 @@ def last_payment_id() -> int:
 def payments_after(payment_id):
     with connect() as c:
         return [dict(r) for r in c.execute("SELECT * FROM payments WHERE id > ? ORDER BY id", [payment_id])]
+
+
+def inbox_state(email):
+    with connect() as c:
+        r = c.execute("SELECT * FROM inbox_state WHERE email = ?", [email]).fetchone()
+        return dict(r) if r else None
+
+
+def set_inbox_state(email, uidvalidity, last_uid):
+    with connect() as c:
+        c.execute("INSERT OR REPLACE INTO inbox_state (email, uidvalidity, last_uid) VALUES (?, ?, ?)",
+                  [email, uidvalidity, last_uid])

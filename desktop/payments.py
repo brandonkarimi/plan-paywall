@@ -14,8 +14,10 @@ import email
 import imaplib
 import logging
 import re
+import select
 import ssl
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from email import policy
 from email.utils import parseaddr, parsedate_to_datetime
@@ -38,8 +40,10 @@ IMAP_HOSTS = {
 CODE_RE = re.compile(r"\bPLN[\s\-_#:]*0*(\d{1,7})\b", re.IGNORECASE)
 AMOUNT_RE = re.compile(r"\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+(?:\.\d{2})?)")
 LOOKBACK_LIMIT = timedelta(days=60)
+CLOCK_SLACK = timedelta(minutes=5)  # the bank's clock and this PC's may differ a little
+IDLE_RENEW = 25 * 60                # servers end a wait-for-new-mail after ~29 minutes; renew before that
 
-_lock = threading.Lock()  # one check at a time ("Check now" and the background check can't overlap)
+_lock = threading.Lock()  # one check at a time
 
 
 class InboxError(Exception):
@@ -170,8 +174,14 @@ def names_match(client_name, payer):
     return bool(_words(client_name) & _words(payer))
 
 
+def _before(payment, sent_at):
+    """True if the payment email is from before ``sent_at`` (so it can't be for that plan)."""
+    sent = datetime.fromisoformat(sent_at) - CLOCK_SLACK
+    return datetime.fromisoformat(payment["received_at"]) < sent
+
+
 def _after(tx, payment):
-    return not tx.get("sent_at") or payment["received_at"] >= tx["sent_at"]
+    return not tx.get("sent_at") or not _before(payment, tx["sent_at"])
 
 
 def match(payment, waiting):
@@ -202,47 +212,110 @@ def match(payment, waiting):
 
 
 # ------------------------------------------------------------------ inbox
-def _fetch(acct, since, connect=None):
-    """Emails from Wells Fargo / Venmo (only those this inbox is used for) since ``since``."""
+def open_inbox(acct, connect=None):
+    """A signed-in connection to the inbox, opened read-only. Raises InboxError."""
     password = inbox_password(acct)
     if not password:
         raise InboxError(f"No password saved for {acct['email']}.")
     host = acct.get("host") or imap_host_for(acct["email"])
     try:
         conn = (connect or imaplib.IMAP4_SSL)(host, int(acct.get("port") or 993),
-                                             ssl_context=ssl.create_default_context())
+                                             ssl_context=ssl.create_default_context(), timeout=60)
     except (OSError, imaplib.IMAP4.error) as exc:
         raise InboxError(f"Couldn't reach {host}: {exc}") from exc
     try:
-        try:
-            conn.login(acct["email"], password)
-        except imaplib.IMAP4.error as exc:
-            raise InboxError(f"Couldn't sign in to {acct['email']}. Check the app password.") from exc
+        conn.login(acct["email"], password)
         conn.select("INBOX", readonly=True)
-        found = []
+    except (OSError, imaplib.IMAP4.error) as exc:
+        close(conn)
+        raise InboxError(f"Couldn't sign in to {acct['email']}. Check the app password.") from exc
+    return conn
+
+
+def close(conn):
+    try:
+        conn.logout()
+    except Exception:
+        pass
+
+
+def _uidvalidity(conn):
+    try:
+        data = conn.response("UIDVALIDITY")[1]
+        value = data[0] if data else b""
+        return value.decode() if isinstance(value, bytes) else str(value or "")
+    except Exception:
+        return ""
+
+
+def _fetch(acct, since, connect=None):
+    """New emails from Wells Fargo / Venmo (only those this inbox is used for).
+
+    Only mail the app hasn't looked at before is downloaded: the inbox's position (IMAP UID) is remembered once the
+    emails are handled. Returns (messages, position to remember)."""
+    conn = open_inbox(acct, connect)
+    try:
+        validity = _uidvalidity(conn)
+        saved = db.inbox_state(acct["email"])
+        last = saved["last_uid"] if saved and saved["uidvalidity"] == validity else 0
+        found, top = [], last
         for method, domains in SOURCES.items():
             if method not in acct.get("methods", SOURCES):
                 continue
             for domain in domains:
-                status, data = conn.uid("SEARCH", None, "SINCE", since.strftime("%d-%b-%Y"), "FROM", domain)
+                criteria = ["SINCE", since.strftime("%d-%b-%Y"), "FROM", domain]
+                if last:
+                    criteria = ["UID", f"{last + 1}:*"] + criteria
+                status, data = conn.uid("SEARCH", None, *criteria)
                 if status != "OK" or not data or not data[0]:
                     continue
                 for uid in data[0].split():
+                    if int(uid) <= last:  # "n:*" always includes the newest message, even if already seen
+                        continue
+                    top = max(top, int(uid))
                     status, parts = conn.uid("FETCH", uid, "(BODY.PEEK[])")  # PEEK: don't mark it read
                     raw = next((p[1] for p in parts or [] if isinstance(p, tuple)), None)
                     if status == "OK" and raw:
                         found.append(email.message_from_bytes(raw, policy=policy.default))
-        return found
+        return found, {"email": acct["email"], "uidvalidity": validity, "last_uid": top}
     finally:
-        try:
-            conn.logout()
-        except Exception:
-            pass
+        close(conn)
 
 
 def test_login(acct, connect=None):
     """Raises InboxError if the inbox can't be opened with the saved details."""
-    _fetch(acct, datetime.now(timezone.utc), connect)
+    close(open_inbox(acct, connect))
+
+
+def _readable(sock, timeout):
+    if getattr(sock, "pending", None) and sock.pending():  # already decrypted, waiting to be read
+        return True
+    return bool(select.select([sock], [], [], timeout)[0])
+
+
+def wait_for_mail(conn, stop, renew=IDLE_RENEW, poll=30):
+    """Wait (IMAP IDLE) until the mail server says new mail arrived → True. Returns False after ``renew`` seconds
+    or once ``stop`` is set. Uses no CPU while waiting: the server pushes the news down the open connection."""
+    tag = conn._new_tag()
+    conn.send(tag + b" IDLE\r\n")
+    if not conn.readline().startswith(b"+"):
+        raise InboxError("The mail server won't report new mail.")
+    deadline = time.monotonic() + renew
+    new_mail = False
+    while not new_mail and not stop.is_set() and time.monotonic() < deadline:
+        if not _readable(conn.socket(), min(poll, max(0.0, deadline - time.monotonic()))):
+            continue
+        line = conn.readline()
+        if not line:
+            raise InboxError("The mail server closed the connection.")
+        new_mail = b"EXISTS" in line.upper()
+    conn.send(b"DONE\r\n")
+    while True:  # finish the IDLE: read up to the server's reply to it
+        line = conn.readline()
+        if not line:
+            raise InboxError("The mail server closed the connection.")
+        if line.startswith(tag):
+            return new_mail
 
 
 def check_inbox(settings=None, connect=None):
@@ -261,14 +334,17 @@ def check_inbox(settings=None, connect=None):
             return result
         oldest = min(datetime.fromisoformat(t["sent_at"]) for t in waiting if t.get("sent_at"))
         since = max(oldest, datetime.now(timezone.utc) - LOOKBACK_LIMIT) - timedelta(days=1)
-        messages, errors = [], []
+        messages, errors, positions = [], [], []
         for box in boxes:
             try:
-                messages += _fetch(box, since, connect)
+                found, position = _fetch(box, since, connect)
+                messages += found
+                positions.append(position)
             except InboxError as exc:
                 errors.append(str(exc))
         if errors:
             result["errors"] = errors
+        first_sent = min(t["sent_at"] for t in waiting if t.get("sent_at"))
         for msg in messages:
             method = trusted_method(msg)
             message_id = str(msg.get("Message-ID", "")).strip()
@@ -277,6 +353,9 @@ def check_inbox(settings=None, connect=None):
             payment = parse_payment(msg, method)
             if payment is None:
                 db.add_payment(message_id=message_id, status="ignored")
+                continue
+            if _before(payment, first_sent):  # an older payment, from before any waiting plan was sent
+                db.add_payment(message_id=message_id, status="ignored", note="Before the plans were sent")
                 continue
             tx, reason = match(payment, db.list_txs(["sent"]))
             fields = {k: payment[k] for k in ("message_id", "method", "amount_cents", "payer", "memo", "received_at")}
@@ -292,6 +371,8 @@ def check_inbox(settings=None, connect=None):
                 result["review"] += 1
                 continue
             result["released"].append(tx["title"] if delivered else f"{tx['title']} (email failed, use Resend)")
+        for position in positions:  # everything up to here is handled: next time, only newer mail is downloaded
+            db.set_inbox_state(**position)
     return result
 
 

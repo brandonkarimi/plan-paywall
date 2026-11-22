@@ -86,14 +86,6 @@ def setup_logging():
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
-def run_background():
-    """PlanSender.exe --background: the hidden payment checker (no window)."""
-    from desktop import background
-
-    setup_logging()
-    background.run()
-
-
 def main():
     setup_logging()
     if already_running():

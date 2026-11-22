@@ -9,8 +9,6 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from desktop import config, db, mailer
-from plancore.pdfinfo import inspect_pdf
-from plancore.preview import build_preview
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 PREVIEW_EMAIL_LIMIT = 12 * 1024 * 1024  # keep the preview attachment comfortably under mail limits
@@ -39,6 +37,8 @@ WATERMARK_TEXT = "PREVIEW"
 
 def make_preview(final_path: Path, out_path: Path, text: str, settings) -> Path:
     """Build the preview, stepping the resolution down if it would be too big to email."""
+    from plancore.preview import build_preview
+
     data = final_path.read_bytes()
     logo = config.image_path("watermark")  # the engineer's logo replaces the PREVIEW text when one is set
     for dpi in sorted({settings.get("preview_dpi", 100), 75, 60, 45}, reverse=True):
@@ -64,6 +64,8 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
     price: optional; needed for payments to be matched automatically. 0 = not entered.
     subject, message: the preview email's wording for this send ("" = the defaults from Settings).
     """
+    from plancore.pdfinfo import inspect_pdf
+
     settings = settings or config.load_settings()
     from_email, to_email = from_email.strip(), to_email.strip()
     client_name, title, share_link = client_name.strip(), title.strip(), share_link.strip()
