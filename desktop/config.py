@@ -108,6 +108,11 @@ def image_path(slot):
     return path if slot in IMAGES and path.is_file() else None
 
 
+def draft_path() -> Path:
+    """What was typed on the Send page but not sent yet, so it's still there after the app is closed."""
+    return data_dir() / "draft.json"
+
+
 def log_path() -> Path:
     return data_dir() / "plansender.log"
 

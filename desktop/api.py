@@ -118,6 +118,9 @@ def payment_summary(result):
     return " ".join(parts)
 
 
+DRAFT_TEXT = ("from_email", "to_email", "client_name", "title", "price", "share_link", "subject", "message")
+
+
 class Api:
     def __init__(self):
         self._window = None
@@ -126,6 +129,38 @@ class Api:
         self._window = window
 
     # ------------------------------------------------------------ state
+    # ------------------------------------------------------------ unsent Send page (survives closing the app)
+
+    def save_draft(self, draft):
+        draft = draft or {}
+        clean = {k: str(draft.get(k) or "")[:20000] for k in DRAFT_TEXT}
+        clean["methods"] = [m for m in (draft.get("methods") or []) if m in config.PAYMENT_METHODS]
+        clean["plan_path"] = str(draft.get("plan_path") or "")
+        clean["invoice_path"] = str(draft.get("invoice_path") or "")
+        path = config.draft_path()
+        if not any(clean[k] for k in DRAFT_TEXT if k != "from_email") and not clean["plan_path"] \
+                and not clean["invoice_path"]:
+            path.unlink(missing_ok=True)  # nothing typed: no draft
+            return _ok()
+        import json
+
+        path.write_text(json.dumps(clean), encoding="utf-8")
+        return _ok()
+
+    def load_draft(self):
+        """The unsent Send page, with the PDFs checked again (a moved or deleted file is left out)."""
+        import json
+
+        try:
+            draft = json.loads(config.draft_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return _ok(draft=None)
+        for key, label in (("plan_path", ""), ("invoice_path", "Invoice")):
+            path = draft.pop(key, "")
+            details = pdf_details(path, label) if path and Path(path).is_file() else None
+            draft[key.replace("_path", "")] = details if details and details["ok"] else None
+        return _ok(draft=draft)
+
     def state(self):
         settings = public_settings()
         return {"settings": settings, "presets": config.SMTP_PRESETS, "payment_methods": config.PAYMENT_METHODS,

@@ -622,3 +622,26 @@ def test_pdf_details_for_chosen_or_dropped_files(env):
     r = pdf_details(str(broken), "Invoice")
     assert not r["ok"] and r["error"].startswith("Invoice: ")
     assert not pdf_details(None)["ok"]
+
+
+# ------------------------------------------------------------------ unsent Send page
+def test_unsent_send_page_is_kept_after_closing(env):
+    from desktop.api import Api
+
+    api = Api()
+    assert api.load_draft()["draft"] is None
+    invoice = env["tmp"] / "invoice.pdf"
+    invoice.write_bytes(env["pdf"].read_bytes())
+    api.save_draft({"from_email": "pat@acmecivil.test", "to_email": "jo@example.com", "client_name": "Jo",
+                    "title": "Lot 7", "price": "1500", "subject": "Hi", "message": "Line 1\nLine 2",
+                    "methods": ["venmo", "bogus"], "plan_path": str(env["pdf"]), "invoice_path": str(invoice)})
+    d = Api().load_draft()["draft"]  # a fresh start of the app
+    assert d["to_email"] == "jo@example.com" and d["message"] == "Line 1\nLine 2" and d["price"] == "1500"
+    assert d["methods"] == ["venmo"]
+    assert d["plan"]["ok"] and d["plan"]["path"] == str(env["pdf"]) and d["invoice"]["name"] == "invoice.pdf"
+    # A PDF that was moved or deleted since is left out
+    invoice.unlink()
+    assert Api().load_draft()["draft"]["invoice"] is None
+    # Cleared page (after sending): no draft
+    api.save_draft({"from_email": "pat@acmecivil.test"})
+    assert api.load_draft()["draft"] is None and not config.draft_path().exists()

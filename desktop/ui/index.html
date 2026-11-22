@@ -661,7 +661,41 @@ function setFile(kind, r) {
   $(b.name).textContent = r ? r.name : b.empty;
   $(b.info).textContent = r ? `${r.pages} page${r.pages === 1 ? "" : "s"} · ${r.size_mb >= 0.1 ? r.size_mb + " MB" : "under 0.1 MB"}` : "";
   $(b.info).classList.toggle("hidden", !r);
+  saveDraft();
 }
+// ------------------------------------------------------------ unsent Send page
+// Everything on the Send page is saved as it's typed, so it's still there if the app is closed before sending.
+const DRAFT_FIELDS = { from_email: "f-from", to_email: "f-to", client_name: "f-name", title: "f-title", price: "f-price",
+  share_link: "f-share", subject: "f-subject", message: "f-message" };
+let draftTimer = null, draftReady = false;
+function saveDraft() {
+  if (!api || !draftReady) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    const d = Object.fromEntries(Object.entries(DRAFT_FIELDS).map(([k, id]) => [k, $(id).value]));
+    d.methods = [...document.querySelectorAll("#f-methods input:checked")].map(i => i.value);
+    d.plan_path = chosen ? chosen.path : ""; d.invoice_path = invoice ? invoice.path : "";
+    api.save_draft(d);
+  }, 300);
+}
+async function restoreDraft() {
+  const r = await api.load_draft();
+  const d = r.ok && r.draft;
+  if (d) {
+    for (const [k, id] of Object.entries(DRAFT_FIELDS)) {
+      if (k === "from_email" && ![...$(id).options].some(o => o.value === d[k])) continue;  // account removed
+      if (d[k] != null) $(id).value = d[k];
+    }
+    if (d.methods && d.methods.length)
+      document.querySelectorAll("#f-methods input").forEach(i => i.checked = d.methods.includes(i.value));
+    if (d.plan) setFile("plan", d.plan);
+    if (d.invoice) setFile("invoice", d.invoice);
+    if (d.share_link) $("share-wrap").classList.remove("hidden");
+  }
+  draftReady = true;
+}
+$("tab-send").addEventListener("input", saveDraft);
+$("tab-send").addEventListener("change", saveDraft);
 function fileDropped(kind, r) {
   $(BOXES[kind].box).classList.remove("drag");
   if (!r.ok) return flash(r.error, "err");
@@ -691,7 +725,7 @@ $("send-btn").addEventListener("click", async () => {
   b.disabled = false; b.textContent = "Send";
   if (!r.ok) { if (r.need_share_link) $("share-wrap").classList.remove("hidden"); return flash(r.error, "err"); }
   ["f-to", "f-name", "f-title", "f-price", "f-share", "f-subject", "f-message"].forEach(id => $(id).value = "");
-  setFile("plan", null); setFile("invoice", null);
+  setFile("plan", null); setFile("invoice", null);  // also clears the saved draft
   // Jump to the log with the new send opened, so it's obvious where it went.
   $("tx-search").value = "";
   await showTab("tx");
@@ -827,6 +861,7 @@ window.addEventListener("pywebviewready", async () => {
   api = window.pywebview.api;
   await loadState();
   applyTheme(state.settings.theme);
+  await restoreDraft();
   showTab(state.setup_needed ? "settings" : "send");
 });
 </script>
