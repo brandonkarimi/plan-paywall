@@ -78,6 +78,26 @@ def transaction_view(tx):
     }
 
 
+def pdf_details(path, label=""):
+    """Check a chosen or dropped file is a readable PDF and describe it for the Send page."""
+    from plancore.pdfinfo import inspect_pdf
+
+    if not path:
+        return _err("Couldn't read that file. Try choosing it instead.")
+    path = Path(path)
+    prefix = f"{label}: " if label else ""
+    if path.suffix.lower() != ".pdf":
+        return _err(f"{prefix}{path.name} isn't a PDF.")
+    try:
+        with path.open("rb") as f:
+            info = inspect_pdf(f)
+    except Exception as exc:
+        return _err(f"{prefix}{exc}")
+    return _ok(path=str(path), name=path.name, pages=info["page_count"],
+               size_mb=round(info["size_bytes"] / 1e6, 1),
+               too_big=info["size_bytes"] > config.ATTACH_LIMIT_BYTES)
+
+
 class Api:
     def __init__(self):
         self._window = None
@@ -117,37 +137,15 @@ class Api:
         result = self._window.create_file_dialog(webview.FileDialog.OPEN, file_types=("PDF files (*.pdf)",))
         if not result:
             return _ok(path=None)
-        path = Path(result[0] if isinstance(result, (list, tuple)) else result)
-        try:
-            from plancore.pdfinfo import inspect_pdf
-
-            with path.open("rb") as f:
-                info = inspect_pdf(f)
-        except Exception as exc:
-            return _err(exc)
-        return _ok(path=str(path), name=path.name, pages=info["page_count"],
-                   size_mb=round(info["size_bytes"] / 1e6, 1),
-                   too_big=info["size_bytes"] > config.ATTACH_LIMIT_BYTES)
+        return pdf_details(result[0] if isinstance(result, (list, tuple)) else result)
 
     def choose_invoice(self):
-        """Pick the invoice PDF and try to read its total so the price can be filled in."""
         import webview
-
-        from plancore.invoice import find_amount_cents
-        from plancore.pdfinfo import inspect_pdf
 
         result = self._window.create_file_dialog(webview.FileDialog.OPEN, file_types=("PDF files (*.pdf)",))
         if not result:
             return _ok(path=None)
-        path = Path(result[0] if isinstance(result, (list, tuple)) else result)
-        try:
-            with path.open("rb") as f:
-                info = inspect_pdf(f)
-        except Exception as exc:
-            return _err(f"Invoice: {exc}")
-        cents = find_amount_cents(str(path))
-        return _ok(path=str(path), name=path.name, pages=info["page_count"],
-                   amount=f"{cents / 100:.2f}" if cents else "")
+        return pdf_details(result[0] if isinstance(result, (list, tuple)) else result, "Invoice")
 
     def send(self, form):
         try:

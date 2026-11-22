@@ -607,3 +607,18 @@ def test_final_email_with_download_link_has_button(env):
     msg = env["smtp"].sent[-1]
     assert "Download plans: https://example.com/plans" in body(msg)
     assert "https://example.com/plans" in msg.get_body(("html",)).get_content()
+
+
+def test_pdf_details_for_chosen_or_dropped_files(env):
+    from desktop.api import pdf_details
+
+    r = pdf_details(str(env["pdf"]))
+    assert r["ok"] and r["name"] == env["pdf"].name and r["pages"] >= 1 and "amount" not in r
+    not_pdf = env["tmp"] / "notes.txt"
+    not_pdf.write_text("hi")
+    assert "isn't a PDF" in pdf_details(str(not_pdf))["error"]
+    broken = env["tmp"] / "broken.pdf"
+    broken.write_bytes(b"nope")
+    r = pdf_details(str(broken), "Invoice")
+    assert not r["ok"] and r["error"].startswith("Invoice: ")
+    assert not pdf_details(None)["ok"]

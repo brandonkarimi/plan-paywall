@@ -93,7 +93,8 @@
 
   .pick { display: flex; align-items: center; gap: 14px; border: 2px dashed var(--line); border-radius: 12px; padding: 16px;
     cursor: pointer; background: var(--field); }
-  .pick:hover, .pick.has { border-color: var(--brand); background: var(--brand-soft); }
+  .pick:hover, .pick.has, .pick.drag { border-color: var(--brand); background: var(--brand-soft); }
+  .pick.drag { border-style: solid; }
   .pick .doc { width: 40px; height: 48px; border-radius: 6px; background: var(--brand); position: relative; flex: none; }
   .pick .doc::before { content: ""; position: absolute; inset: 8px 7px; background:
     linear-gradient(#fff 0 0) 0 4px / 100% 3px no-repeat, linear-gradient(#fff 0 0) 0 13px / 100% 3px no-repeat,
@@ -238,14 +239,15 @@
           <label>Plan PDF</label>
           <div class="pick" id="pick" role="button" tabindex="0">
             <span class="doc"></span>
-            <div><div class="name" id="pick-name">Choose the plan PDF…</div><div class="sub" id="pick-info">Sent as a watermarked preview</div></div>
+            <div style="flex:1;min-width:0"><div class="name" id="pick-name">Choose or drop the plan PDF…</div><div class="sub hidden" id="pick-info"></div></div>
+            <button class="btn ghost hidden" id="pick-clear" title="Remove plan PDF" style="padding:4px 10px">✕</button>
           </div>
         </div>
         <div>
           <label>Invoice PDF</label>
           <div class="pick invoice" id="inv-pick" role="button" tabindex="0">
             <span class="doc inv"></span>
-            <div style="flex:1;min-width:0"><div class="name" id="inv-name">Attach an invoice…</div><div class="sub" id="inv-info">Sent to the client as-is</div></div>
+            <div style="flex:1;min-width:0"><div class="name" id="inv-name">Choose or drop the invoice PDF…</div><div class="sub hidden" id="inv-info"></div></div>
             <button class="btn ghost hidden" id="inv-clear" title="Remove invoice" style="padding:4px 10px">✕</button>
           </div>
         </div>
@@ -607,48 +609,51 @@ $("settings-save").addEventListener("click", async () => {
 });
 
 // ------------------------------------------------------------ send
-async function pickFile() {
-  const r = await api.choose_pdf();
-  if (!r.ok) return flash(r.error, "err");
-  if (!r.path) return;
-  chosen = r;
-  $("pick").classList.add("has");
-  $("pick-name").textContent = r.name;
-  $("pick-info").textContent = `${r.pages} page${r.pages === 1 ? "" : "s"} · ${r.size_mb} MB · click to change`;
-  $("share-wrap").classList.toggle("hidden", !r.too_big);
-}
+// The two PDF boxes: click to choose a file, or drag one onto the box (the drop itself is handled in app.py,
+// which calls fileDropped). ✕ empties a box.
 let invoice = null;
-async function pickInvoice() {
-  const r = await api.choose_invoice();
+const BOXES = {
+  plan: { box: "pick", name: "pick-name", info: "pick-info", clear: "pick-clear", empty: "Choose or drop the plan PDF…" },
+  invoice: { box: "inv-pick", name: "inv-name", info: "inv-info", clear: "inv-clear", empty: "Choose or drop the invoice PDF…" },
+};
+function setFile(kind, r) {
+  const b = BOXES[kind];
+  if (kind === "plan") { chosen = r; $("share-wrap").classList.toggle("hidden", !(r && r.too_big)); } else invoice = r;
+  $(b.box).classList.toggle("has", !!r); $(b.clear).classList.toggle("hidden", !r);
+  $(b.name).textContent = r ? r.name : b.empty;
+  $(b.info).textContent = r ? `${r.pages} page${r.pages === 1 ? "" : "s"} · ${r.size_mb >= 0.1 ? r.size_mb + " MB" : "under 0.1 MB"}` : "";
+  $(b.info).classList.toggle("hidden", !r);
+}
+function fileDropped(kind, r) {
+  $(BOXES[kind].box).classList.remove("drag");
   if (!r.ok) return flash(r.error, "err");
-  if (!r.path) return;
-  invoice = r;
-  $("inv-pick").classList.add("has"); $("inv-clear").classList.remove("hidden");
-  $("inv-name").textContent = r.name;
-  $("inv-info").textContent = r.amount ? `Total: $${Number(r.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })} · click to change` : "Attached · click to change";
+  $("flash").replaceChildren(); setFile(kind, r);
 }
-function clearInvoice() {
-  invoice = null;
-  $("inv-pick").classList.remove("has"); $("inv-clear").classList.add("hidden");
-  $("inv-name").textContent = "Attach an invoice…"; $("inv-info").textContent = "Sent to the client as-is";
+async function chooseFile(kind) {
+  const r = kind === "plan" ? await api.choose_pdf() : await api.choose_invoice();
+  if (!r.ok) return flash(r.error, "err");
+  if (r.path) setFile(kind, r);
 }
-$("inv-pick").addEventListener("click", (e) => { if (!e.target.closest("#inv-clear")) pickInvoice(); });
-$("inv-pick").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pickInvoice(); });
-$("inv-clear").addEventListener("click", (e) => { e.stopPropagation(); clearInvoice(); });
-$("pick").addEventListener("click", pickFile);
-$("pick").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") pickFile(); });
+for (const kind of Object.keys(BOXES)) {
+  const b = BOXES[kind], box = $(b.box);
+  box.addEventListener("click", (e) => { if (!e.target.closest("#" + b.clear)) chooseFile(kind); });
+  box.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") chooseFile(kind); });
+  $(b.clear).addEventListener("click", (e) => { e.stopPropagation(); setFile(kind, null); });
+  box.addEventListener("dragover", (e) => { e.preventDefault(); box.classList.add("drag"); });
+  box.addEventListener("dragleave", (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove("drag"); });
+}
+// A file dropped anywhere else must not open in the window.
+["dragover", "drop"].forEach(t => document.addEventListener(t, (e) => e.preventDefault()));
 $("send-btn").addEventListener("click", async () => {
   const b = $("send-btn"); b.disabled = true; b.textContent = "Building preview and sending…";
   const r = await api.send({ from_email: $("f-from").value, to_email: $("f-to").value, client_name: $("f-name").value,
-    title: $("f-title").value, price: invoice ? invoice.amount : "", pdf_path: chosen ? chosen.path : "", share_link: $("f-share").value,
+    title: $("f-title").value, pdf_path: chosen ? chosen.path : "", share_link: $("f-share").value,
     methods: [...document.querySelectorAll("#f-methods input:checked")].map(i => i.value),
     invoice_path: invoice ? invoice.path : "", subject: $("f-subject").value, message: $("f-message").value });
   b.disabled = false; b.textContent = "Send";
   if (!r.ok) { if (r.need_share_link) $("share-wrap").classList.remove("hidden"); return flash(r.error, "err"); }
   ["f-to", "f-name", "f-title", "f-share", "f-subject", "f-message"].forEach(id => $(id).value = "");
-  chosen = null; $("pick").classList.remove("has"); $("pick-name").textContent = "Choose the plan PDF…";
-  $("pick-info").textContent = "Sent as a watermarked preview"; $("share-wrap").classList.add("hidden");
-  clearInvoice();
+  setFile("plan", null); setFile("invoice", null);
   // Jump to the log with the new send opened, so it's obvious where it went.
   $("tx-search").value = "";
   await showTab("tx");

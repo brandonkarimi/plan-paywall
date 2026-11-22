@@ -30,6 +30,31 @@ def clear_page_cache(storage):
         shutil.rmtree(Path(storage) / "EBWebView" / "Default" / name, ignore_errors=True)
 
 
+def wire_drops(window):
+    """Let PDFs be dragged onto the Plan PDF and Invoice PDF boxes. Only pywebview's own drop events carry the
+    file's full path, so the drop is handled here and the result handed to the page."""
+    import json
+
+    from webview.dom import DOMEventHandler
+
+    from desktop.api import pdf_details
+
+    def handler(kind):
+        def on_drop(event):
+            files = (event.get("dataTransfer") or {}).get("files") or []
+            path = next((f.get("pywebviewFullPath") for f in files if f.get("pywebviewFullPath")), None)
+            result = pdf_details(path, "Invoice" if kind == "invoice" else "")
+            window.evaluate_js(f"fileDropped({json.dumps(kind)}, {json.dumps(result)})")
+        return on_drop
+
+    try:
+        for selector, kind in (("#pick", "plan"), ("#inv-pick", "invoice")):
+            window.dom.get_element(selector).events.drop += DOMEventHandler(handler(kind), prevent_default=True,
+                                                                            stop_propagation=True)
+    except Exception:  # choosing files by clicking still works
+        logging.getLogger(__name__).exception("Couldn't set up drag and drop")
+
+
 def main():
     logging.basicConfig(filename=config.log_path(), level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -41,6 +66,7 @@ def main():
     window = webview.create_window("Plan Sender", url=str(resource("desktop/ui/index.html")), js_api=api,
                                    width=1040, height=820, min_size=(760, 600))
     api._attach(window)
+    window.events.loaded += lambda *_: wire_drops(window)
     storage = config.data_dir() / "webview"
     clear_page_cache(storage)
     webview.start(private_mode=False, storage_path=str(storage))
