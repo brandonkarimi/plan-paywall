@@ -215,6 +215,26 @@ def test_other_emails_from_venmo_are_ignored(env, inbox):
     assert payments.check_inbox() == {"released": [], "review": 0}
 
 
+@pytest.mark.parametrize("subject", [
+    "Jo Smith paid $1,500.00 to your Venmo account. Leave it in Venmo or transfer it to your bank account.",
+    "You received a payment",  # the wording only in the email text
+])
+def test_venmo_paid_to_your_venmo_account_wording(env, inbox, subject):
+    tx_id = send(env)
+    text = ("Jo Smith paid $1,500.00 to your Venmo account. Leave it in Venmo or transfer it to your bank account.\n"
+            "Note: Bob paid $9.00 to your Venmo account")
+    inbox.messages.append(payment_email("Venmo", subject=subject, text=text))
+    assert payments.check_inbox()["released"] == ["Lot 7 Grading"] and released(tx_id)
+    assert "Venmo payment of $1,500.00 from Jo Smith found in your email" in log_texts(tx_id)
+
+
+def test_venmo_you_paid_wording_is_ignored(env, inbox):
+    send(env)
+    inbox.messages.append(payment_email("Venmo", subject="You paid $1,500.00 to Jo Smith",
+                                        text="You paid $1,500.00 to your Venmo account friend Jo Smith"))
+    assert payments.check_inbox() == {"released": [], "review": 0}
+
+
 def test_payment_from_before_the_plan_was_sent_doesnt_count(env, inbox):
     tx_id = send(env)
     inbox.messages.append(payment_email("Venmo", note=f"PLN-{tx_id}",

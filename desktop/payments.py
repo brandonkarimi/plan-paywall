@@ -134,10 +134,19 @@ def parse_payment(msg, method):
     low = everything.lower()
     amount_text = None
     if method == "Venmo":
+        # "Jo Smith paid you $15.00", or the newer "Jo Smith paid $15.00 to your Venmo account." (in the subject or
+        # the email's first such line; the payer's own note comes after it, so the first match is Venmo's).
         m = re.search(r"^(.*?)\s+paid you\s+\$", subject, re.IGNORECASE)
-        if not m:  # not a payment received (requests, "You paid ...", statements, ...)
-            return None
-        payer = m.group(1)
+        if m:
+            payer = m.group(1)
+        else:
+            if re.search(r"^you (?:paid|sent)\b|request|charge|declin|fail|cancel", subject, re.IGNORECASE):
+                return None
+            m = re.search(r"^([A-Za-z][\w .,'&-]{0,60}?)\s+paid\s+\$\s?([\d,]+(?:\.\d{2})?)\s+to your venmo",
+                          f"{subject}\n{text}", re.IGNORECASE | re.MULTILINE)
+            if not m or m.group(1).strip().lower() == "you":  # not a payment received (requests, "You paid ...")
+                return None
+            payer, amount_text = m.group(1), m.group(2)
     else:
         # Wells Fargo: subject "You received money with Zelle", body "DONOVAN KARIMI sent you $15.00". What kind of
         # email it is comes from the subject: the fine print of every Zelle email mentions "payment requests".
