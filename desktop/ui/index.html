@@ -260,13 +260,21 @@
           <input id="f-share" type="url" placeholder="https://… (OneDrive / Dropbox / Google Drive share link)">
           <div class="sub" style="margin-top:4px">Only emailed to the client after they pay. Don't share this link anywhere else.</div>
         </div>
-        <div class="full">
-          <label for="f-subject">Email subject</label>
+        <div>
+          <label for="f-subject">Preview email subject</label>
           <input id="f-subject" type="text" maxlength="300">
         </div>
-        <div class="full">
-          <label for="f-message">Email message</label>
+        <div>
+          <label for="f-final-subject">Final plans email subject</label>
+          <input id="f-final-subject" type="text" maxlength="300">
+        </div>
+        <div>
+          <label for="f-message">Preview email message</label>
           <textarea id="f-message" rows="6"></textarea>
+        </div>
+        <div>
+          <label for="f-final-message">Final plans email message</label>
+          <textarea id="f-final-message" rows="6"></textarea>
         </div>
         <div class="full">
           <button class="btn big" id="send-btn">Send</button>
@@ -664,7 +672,8 @@ function setFile(kind, r) {
 // ------------------------------------------------------------ unsent Send page
 // Everything on the Send page is saved as it's typed, so it's still there if the app is closed before sending.
 const DRAFT_FIELDS = { from_email: "f-from", to_email: "f-to", client_name: "f-name", title: "f-title", price: "f-price",
-  share_link: "f-share", subject: "f-subject", message: "f-message" };
+  share_link: "f-share", subject: "f-subject", message: "f-message", final_subject: "f-final-subject",
+  final_message: "f-final-message" };
 let draftTimer = null, draftReady = false;
 function saveDraft() {
   if (!api || !draftReady) return;
@@ -720,7 +729,8 @@ async function sendPlans() {
   const r = await api.send({ from_email: $("f-from").value, to_email: $("f-to").value, client_name: $("f-name").value,
     title: $("f-title").value, price: $("f-price").value, pdf_path: chosen ? chosen.path : "", share_link: $("f-share").value,
     methods: [...document.querySelectorAll("#f-methods input:checked")].map(i => i.value),
-    invoice_path: invoice ? invoice.path : "", subject: $("f-subject").value, message: $("f-message").value });
+    invoice_path: invoice ? invoice.path : "", subject: $("f-subject").value, message: $("f-message").value,
+    final_subject: $("f-final-subject").value, final_message: $("f-final-message").value });
   b.disabled = false; b.textContent = "Send";
   if (!r.ok && r.same_price) {
     // Payments are matched by their exact amount, so each unpaid plan needs a price of its own.
@@ -730,7 +740,8 @@ async function sendPlans() {
     return;
   }
   if (!r.ok) { if (r.need_share_link) $("share-wrap").classList.remove("hidden"); return flash(r.error, "err"); }
-  ["f-to", "f-name", "f-title", "f-price", "f-share", "f-subject", "f-message"].forEach(id => $(id).value = "");
+  ["f-to", "f-name", "f-title", "f-price", "f-share", "f-subject", "f-message", "f-final-subject",
+    "f-final-message"].forEach(id => $(id).value = "");
   setFile("plan", null); setFile("invoice", null);  // also clears the saved draft
   // Jump to the log with the new send opened, so it's obvious where it went.
   $("tx-search").value = "";

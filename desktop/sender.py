@@ -56,7 +56,7 @@ INVOICE_LIMIT_BYTES = 6 * 1024 * 1024
 
 
 def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="", share_link="", methods=None,
-               invoice_path="", subject="", message="", settings=None):
+               invoice_path="", subject="", message="", final_subject="", final_message="", settings=None):
     """Returns the new transaction id. Raises SendError (NeedShareLink for very large PDFs).
 
     methods: "zelle" and/or "venmo" (default: every method enabled in Settings).
@@ -92,7 +92,8 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
             raise SendError("The invoice PDF is too large to email (over 6 MB).")
     price_cents = _price_cents(price) if str(price or "").strip() else 0
     subject, message = (subject or "").strip(), (message or "").strip()
-    if len(subject) > 300:
+    final_subject, final_message = (final_subject or "").strip(), (final_message or "").strip()
+    if len(subject) > 300 or len(final_subject) > 300:
         raise SendError("The email subject is too long (300 characters at most).")
     src = Path(pdf_path or "")
     if not src.is_file():
@@ -120,6 +121,7 @@ def send_plans(*, from_email, to_email, price, pdf_path, client_name="", title="
         price_cents=price_cents, status="draft", original_name=src.name, share_link=share_link,
         sha256=info["sha256"], pages=info["page_count"], size_bytes=info["size_bytes"], sheets=info["sheet_index"],
         methods=methods, email_subject=subject, email_body=message,
+        final_subject=final_subject, final_body=final_message,
     )
     db.update_tx(tx_id, ref_code=f"PLN-{tx_id}")
     folder = config.files_dir(tx_id)

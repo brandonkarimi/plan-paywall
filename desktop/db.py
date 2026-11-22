@@ -38,7 +38,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     paid_method TEXT NOT NULL DEFAULT '',      -- Zelle, Venmo, Check, Cash, Other
     invoice_path TEXT NOT NULL DEFAULT '',     -- optional invoice PDF sent with the preview
     email_subject TEXT NOT NULL DEFAULT '',    -- the preview email's wording as written for this send
-    email_body TEXT NOT NULL DEFAULT ''        -- ('' = the defaults from Settings)
+    email_body TEXT NOT NULL DEFAULT '',       -- ('' = the standard wording)
+    final_subject TEXT NOT NULL DEFAULT '',    -- the final-plans email's wording, written at send time
+    final_body TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS activity (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,6 +79,8 @@ UPGRADE_COLUMNS = {
     "invoice_path": "TEXT NOT NULL DEFAULT ''",
     "email_subject": "TEXT NOT NULL DEFAULT ''",
     "email_body": "TEXT NOT NULL DEFAULT ''",
+    "final_subject": "TEXT NOT NULL DEFAULT ''",
+    "final_body": "TEXT NOT NULL DEFAULT ''",
 }
 
 

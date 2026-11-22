@@ -326,8 +326,8 @@ def invite(tx, settings):
 def files(tx, settings):
     """The final-plans email, sent once the engineer marks the payment received: their own subject and message,
     plus a download button when the plans go by link instead of attachment."""
-    subject = fill(_wording(settings, "final_subject"), tx)
-    paragraphs = message_paragraphs(fill(_wording(settings, "final_body"), tx))
+    subject = fill((tx.get("final_subject") or "").strip() or _wording(settings, "final_subject"), tx)
+    paragraphs = message_paragraphs(fill((tx.get("final_body") or "").strip() or _wording(settings, "final_body"), tx))
     button = None
     if tx.get("share_link"):
         if not paragraphs:

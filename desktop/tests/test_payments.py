@@ -554,3 +554,19 @@ def test_update_rechecks_payments_waiting_for_ok(env, inbox):
     db.init()
     assert db.list_payments("review") == []
     assert payments.check_inbox()["released"] == ["Lot 7 Grading"] and released(tx_id)
+
+
+def test_custom_final_plans_email(env, inbox):
+    tx_id = send(env, final_subject="Your {project} plans are ready", final_message="Thanks {client}!\n\nFull set attached.")
+    inbox.messages.append(payment_email("Zelle", subject="You received money with Zelle", text=WELLS_FARGO_TEXT))
+    assert payments.check_inbox()["released"] == ["Lot 7 Grading"]
+    final = env["smtp"].sent[-1]
+    assert final["Subject"] == "Your Lot 7 Grading plans are ready"
+    assert body(final).startswith("Thanks Jo Smith!\n\nFull set attached.")
+    assert attachments(final)[0][0] == "Lot 7 Grading.pdf"
+    sender.resend(tx_id)  # a resend uses the same wording
+    assert env["smtp"].sent[-1]["Subject"] == "Your Lot 7 Grading plans are ready"
+    # Left empty: the standard wording
+    t2 = send(env, price="900", to_email="b@example.com")
+    sender.mark_paid(t2, "Venmo")
+    assert env["smtp"].sent[-1]["Subject"] == "Plans: Lot 7 Grading"

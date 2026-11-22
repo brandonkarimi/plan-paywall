@@ -137,7 +137,8 @@ def same_price(price):
             "suggested_text": mailer.money(free)}
 
 
-DRAFT_TEXT = ("from_email", "to_email", "client_name", "title", "price", "share_link", "subject", "message")
+DRAFT_TEXT = ("from_email", "to_email", "client_name", "title", "price", "share_link", "subject", "message",
+              "final_subject", "final_message")
 
 
 class Api:
@@ -241,6 +242,7 @@ class Api:
                 share_link=form.get("share_link", ""), methods=form.get("methods"),
                 invoice_path=form.get("invoice_path", ""),
                 subject=form.get("subject", ""), message=form.get("message", ""),
+                final_subject=form.get("final_subject", ""), final_message=form.get("final_message", ""),
             )
         except sender.NeedShareLink as exc:
             return _err(exc, need_share_link=True)
