@@ -7,7 +7,7 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
-from desktop import config, db, images, mailer, payments, sender
+from desktop import background, config, db, images, mailer, payments, sender
 
 log = logging.getLogger(__name__)
 
@@ -143,6 +143,7 @@ class Api:
         return {
             "items": [transaction_view(t) for t in txs],
             "review": [payment_view(p) for p in db.list_payments("review")],
+            "payment_errors": (background.read_status().get("errors") or []) if background.enabled() else [],
             "waiting": [{"id": t["id"], "label": f"{t['ref_code']} · {t['title']} · {t['client_email']}"
                          + (f" · {mailer.money(t['price_cents'])}" if t["price_cents"] else "")}
                         for t in txs if t["status"] == "sent"],
@@ -226,19 +227,6 @@ class Api:
             config.set_secret(f"imap:{address}", password)
         settings["auto_payments"] = auto
         return ""
-
-    def check_payments_now(self):
-        try:
-            result = payments.check_inbox()
-        except payments.InboxError as exc:
-            return _err(exc)
-        except Exception as exc:
-            log.exception("Payment check failed")
-            return _err(f"Couldn't check for payments: {exc}")
-        message = payment_summary(result) or "No new payments found."
-        if result.get("errors"):
-            return _err(" ".join(result["errors"]) + (f" {message}" if result["released"] or result["review"] else ""))
-        return _ok(message=message, **result)
 
     def confirm_payment(self, payment_id, tx_id):
         """The engineer says which plan a found payment is for: mark it paid and email the plans."""
@@ -350,6 +338,8 @@ class Api:
                                 f"or switch {field.title()} off.")
                 settings[field] = {**settings[field], **clean}
         config.save_settings(settings)
+        if "auto_payments" in payload:
+            background.sync(settings)  # start (and start with Windows) or stop the payment checker
         return _ok(state=self.state())
 
     def signature_preview(self, signature):

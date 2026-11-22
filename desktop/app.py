@@ -56,38 +56,46 @@ def wire_drops(window):
         logging.getLogger(__name__).exception("Couldn't set up drag and drop")
 
 
-CHECK_EVERY = 120  # seconds between looks at the inbox for payment emails
-
-
 def watch_payments(window):
-    """While the app is open, look for Zelle/Venmo payment emails at start-up and then every few minutes, and tell
-    the page when plans were sent or a payment needs confirming."""
+    """While the window is open, show what the background checker finds: a message when plans were sent or a payment
+    needs confirming, and an up-to-date Transactions list. (The checker itself runs in desktop.background.)"""
     import json
     import time
 
-    from desktop import payments
     from desktop.api import payment_summary
 
-    log = logging.getLogger("desktop.payments")
-    time.sleep(5)
+    last = db.last_payment_id()
     while True:
+        time.sleep(10)
         try:
-            result = payments.check_inbox()
-            for error in result.get("errors", []):
-                log.warning("Payment check: %s", error)
+            new = db.payments_after(last)
+            if not new:
+                continue
+            last = max(p["id"] for p in new)
+            result = {"released": [db.get_tx(p["tx_id"])["title"] for p in new if p["status"] == "released"
+                                   and p["tx_id"] and db.get_tx(p["tx_id"])],
+                      "review": sum(1 for p in new if p["status"] == "review")}
             if result["released"] or result["review"]:
-                log.info("Payment check: %s", result)
                 window.evaluate_js(f"paymentsFound({json.dumps(payment_summary(result))})")
-        except payments.InboxError as exc:
-            log.warning("Payment check: %s", exc)
         except Exception:
-            log.exception("Payment check failed")
-        time.sleep(CHECK_EVERY)
+            logging.getLogger(__name__).exception("Couldn't refresh payments")
+
+
+def setup_logging():
+    logging.basicConfig(filename=config.log_path(), level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+
+def run_background():
+    """PlanSender.exe --background: the hidden payment checker (no window)."""
+    from desktop import background
+
+    setup_logging()
+    background.run()
 
 
 def main():
-    logging.basicConfig(filename=config.log_path(), level=logging.INFO,
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    setup_logging()
     if already_running():
         ctypes.windll.user32.MessageBoxW(None, "Plan Sender is already open.", "Plan Sender", 0x40)
         return
@@ -97,6 +105,9 @@ def main():
                                    width=1040, height=820, min_size=(760, 600))
     api._attach(window)
     window.events.loaded += lambda *_: wire_drops(window)
+    from desktop import background
+
+    background.sync()  # make sure the payment checker is running (and starts with Windows) if it's turned on
     threading.Thread(target=watch_payments, args=(window,), daemon=True).start()
     storage = config.data_dir() / "webview"
     clear_page_cache(storage)

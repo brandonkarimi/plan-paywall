@@ -375,7 +375,6 @@
         <div><label for="p-zelle-pass">App password</label><input id="p-zelle-pass" type="password" autocomplete="off"></div>
         <div><label for="p-venmo-email">Venmo alerts email</label><input id="p-venmo-email" type="email" placeholder="Same as Zelle"></div>
         <div id="p-venmo-pass-wrap"><label for="p-venmo-pass">App password</label><input id="p-venmo-pass" type="password" autocomplete="off"></div>
-        <div class="full"><button class="btn ghost" id="p-check" type="button">Check for payments now</button></div>
       </div>
     </div>
 
@@ -618,12 +617,6 @@ function venmoInboxChanged() {
   $("p-venmo-pass-wrap").classList.toggle("hidden", !v || v === $("p-zelle-email").value.trim().toLowerCase());
 }
 ["p-zelle-email", "p-venmo-email"].forEach(id => $(id).addEventListener("input", venmoInboxChanged));
-$("p-check").addEventListener("click", async (e) => {
-  e.target.disabled = true; e.target.textContent = "Checking…";
-  const r = await api.check_payments_now();
-  e.target.disabled = false; e.target.textContent = "Check for payments now";
-  flash(r.ok ? r.message : r.error, r.ok ? "ok" : "err");
-});
 // Called by the app when the background check found something.
 function paymentsFound(message) {
   flash(message);
@@ -721,12 +714,14 @@ async function loadTransactions() {
   $("t-collected").textContent = data.totals.collected; $("t-waiting").textContent = data.totals.waiting;
   $("t-methods").textContent = data.totals.by_method.length ? "Received: " + data.totals.by_method.join(" · ") : "";
   txItems = data.items;
-  renderReview(data.review, data.waiting);
+  renderReview(data.review, data.waiting, data.payment_errors);
   $("reset-btn").classList.toggle("hidden", !txItems.length);
   renderTransactions();
 }
-function renderReview(items, waiting) {
+function renderReview(items, waiting, errors) {
   const box = $("review"); box.replaceChildren();
+  if (errors && errors.length) box.append(el("div", { class: "notice err" },
+    el("b", {}, "Automatic payments can't read your email. "), errors.join(" "), " Check Settings → Automatic payments."));
   for (const p of items) {
     const pick = el("select", { style: "width:auto;max-width:100%" },
       el("option", { value: "" }, "Choose the plan it's for…"), waiting.map(w => el("option", { value: w.id }, w.label)));

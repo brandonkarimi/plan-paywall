@@ -73,7 +73,13 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr("smtplib.SMTP_SSL", FakeSMTP)
     monkeypatch.setattr("smtplib.SMTP", FakeSMTP)
 
-    from desktop import config, db
+    from desktop import background, config, db
+
+    # Never touch the real Windows start-up list or start real background processes from tests.
+    startup = {"command": None, "launched": 0}
+    monkeypatch.setattr(background, "_set_startup", lambda cmd: startup.update(command=cmd))
+    monkeypatch.setattr(background, "_launch", lambda: startup.update(launched=startup["launched"] + 1))
+    monkeypatch.setattr(background, "is_running", lambda: False)
 
     db.init()
     settings = config.load_settings()
@@ -89,4 +95,4 @@ def env(tmp_path, monkeypatch):
 
     pdf = tmp_path / "Lot_7_Grading.pdf"
     pdf.write_bytes(make_pdf())
-    return {"pdf": pdf, "tmp": tmp_path, "smtp": FakeSMTP}
+    return {"pdf": pdf, "tmp": tmp_path, "smtp": FakeSMTP, "startup": startup}

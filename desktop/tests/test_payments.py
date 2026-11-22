@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from desktop import config, db, payments
+from desktop import background, config, db, payments
 from desktop.tests.test_desktop import attachments, body, log_texts, send
 
 
@@ -197,8 +197,7 @@ def test_engineer_confirms_a_payment_from_transactions(env, inbox):
     tx_id = send(env)
     inbox.messages.append(payment_email("Zelle", payer="Unknown Person", note=""))
     api = Api()
-    r = api.check_payments_now()
-    assert r["ok"] and "need" in r["message"]
+    assert payments.check_inbox()["review"] == 1
     data = api.transactions()
     (item,) = data["review"]
     assert item["amount"] == "$1,500.00" and item["payer"] == "Unknown Person"
@@ -268,8 +267,9 @@ def test_one_inbox_failing_doesnt_stop_the_other(env, inbox):
     result = payments.check_inbox()
     assert result["released"] == ["Lot 7 Grading"] and "venmo@yahoo.test" in result["errors"][0]
     send(env, to_email="b@example.com")  # something still waiting, so the inboxes are read again
-    r = Api().check_payments_now()
-    assert not r["ok"] and "venmo@yahoo.test" in r["error"]
+    assert background.tick()
+    errors = Api().transactions()["payment_errors"]  # shown at the top of Transactions
+    assert len(errors) == 1 and "venmo@yahoo.test" in errors[0]
 
 
 def test_settings_from_the_test_version_still_work(env, inbox):
@@ -279,3 +279,51 @@ def test_settings_from_the_test_version_still_work(env, inbox):
     tx_id = send(env)
     inbox.messages.append(payment_email("Venmo", note=f"PLN-{tx_id}"))
     assert payments.check_inbox()["released"] == ["Lot 7 Grading"]
+
+
+# ------------------------------------------------------------------ background checker
+def test_turning_automatic_payments_on_and_off_starts_and_stops_the_checker(env, inbox):
+    from desktop.api import Api
+
+    api = Api()
+    assert api.save_settings({"auto_payments": {"enabled": True, "zelle": {"email": "pat@gmail.test"}}})["ok"]
+    assert env["startup"]["command"][-1] == "--background" and env["startup"]["launched"] == 1
+    assert api.save_settings({"auto_payments": {"enabled": False, "zelle": {"email": "pat@gmail.test"}}})["ok"]
+    assert env["startup"]["command"] is None  # no longer starts with Windows
+    assert background.tick() is False         # a running checker quits
+    # Other settings changes don't touch the checker
+    env["startup"]["command"] = "unchanged"
+    api.save_settings({"signature": {"name": "Pat"}})
+    assert env["startup"]["command"] == "unchanged"
+
+
+def test_checker_only_reads_the_inbox_while_plans_are_waiting(env, inbox):
+    inbox.searched.clear()
+    assert background.tick() is True and inbox.searched == []  # nothing waiting: inbox not read
+    tx_id = send(env)
+    inbox.messages.append(payment_email("Venmo", note=f"PLN-{tx_id}"))
+    assert background.tick() is True and inbox.searched and released(tx_id)
+    inbox.searched.clear()
+    assert background.tick() is True and inbox.searched == []  # paid: nothing waiting again
+    assert background.read_status()["errors"] == []
+
+
+def test_checker_keeps_going_after_an_unexpected_error(env, inbox, monkeypatch):
+    send(env)
+    monkeypatch.setattr(payments, "check_inbox", lambda *a, **k: 1 / 0)
+    assert background.tick() is True
+    assert "Couldn't check for payments" in background.read_status()["errors"][0]
+
+
+def test_window_hears_about_payments_found_by_the_checker(env, inbox):
+    last = db.last_payment_id()
+    tx_id = send(env)
+    inbox.messages.append(payment_email("Venmo", note=f"PLN-{tx_id}"))
+    background.tick()
+    (new,) = db.payments_after(last)
+    assert new["status"] == "released" and new["tx_id"] == tx_id
+
+
+def test_background_command():
+    cmd = background.command()
+    assert cmd[-1] == "--background" and cmd[-2].endswith("run_desktop.py")

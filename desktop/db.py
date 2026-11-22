@@ -204,3 +204,13 @@ def get_payment(payment_id):
 def list_payments(status):
     with connect() as c:
         return [dict(r) for r in c.execute("SELECT * FROM payments WHERE status = ? ORDER BY id DESC", [status])]
+
+
+def last_payment_id() -> int:
+    with connect() as c:
+        return c.execute("SELECT COALESCE(MAX(id), 0) FROM payments").fetchone()[0]
+
+
+def payments_after(payment_id):
+    with connect() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM payments WHERE id > ? ORDER BY id", [payment_id])]
