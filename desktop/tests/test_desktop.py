@@ -389,6 +389,7 @@ def test_qr_codes_are_drawn_into_the_email_not_attached(env):
     assert "<img" not in html  # nothing to open or swipe through
     # Each card has a button: Zelle opens its QR link, Venmo opens the app with the exact price filled in
     assert f"href='{ZELLE_LINK}'" in html and ">Pay with Zelle</a>" in html
+    assert html.count("Or click here to pay:") == 2  # one above each button
     assert "href='https://venmo.com/AcmeCivil-Eng?txn=pay&amp;amount=100.00'" in html and ">Pay with Venmo</a>" in html
     text = msg.get_body(("plain",)).get_content()
     assert ZELLE_LINK in text and "https://venmo.com/AcmeCivil-Eng?txn=pay&amount=100.00" in text

@@ -261,7 +261,8 @@ def _qr_block(tx, settings):
         label, color = QR_CARD[method]
         if i:
             cells.append("<td width=14 style='width:14px'></td>")
-        button = (f"<div style='margin:12px 0 0'><a href='{escape(link)}' style='background:{color};color:#fff;"
+        button = ("<div style='margin:12px 0 6px;font-size:14px;color:#4b5563'>Or click here to pay:</div>"
+                  f"<div><a href='{escape(link)}' style='background:{color};color:#fff;"
                   "padding:9px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;"
                   f"display:inline-block'>Pay with {label}</a></div>") if link else ""
         cells.append(
