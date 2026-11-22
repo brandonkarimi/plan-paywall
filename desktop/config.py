@@ -27,7 +27,8 @@ SMTP_PRESETS = {
     "custom": {"label": "Other (custom SMTP)", "host": "", "port": 587, "security": "starttls", "help": ""},
 }
 
-# Standard wording of the two emails. The preview one can be replaced per send on the Send page.
+# Built-in wording of the two emails. The engineer can save their own in Settings; either is used when the
+# matching box on the Send page is left empty.
 # {client}, {project} and {amount} are filled in; blank ones drop out ("Hello {client}," → "Hello,").
 EMAIL_DEFAULTS = {
     "preview_subject": "Preview: {project}",
@@ -44,6 +45,7 @@ DEFAULT_SETTINGS = {
     "signature": {"name": "", "license": "", "phone": "", "email": "", "street": "", "city": ""},
     "zelle": {"enabled": False, "recipient": "", "name": ""},   # email/phone clients send to + name shown in Zelle
     "venmo": {"enabled": False, "username": ""},
+    "emails": dict(EMAIL_DEFAULTS),  # the engineer's default subjects and messages (Settings)
     # Automatic payments: the inbox(es) that get the Wells Fargo (Zelle) and Venmo payment emails; an empty Venmo
     # email means the same inbox as Zelle. Passwords live in Windows Credential Manager as "imap:<email>".
     "auto_payments": {"enabled": False, "zelle": {"email": ""}, "venmo": {"email": ""}},

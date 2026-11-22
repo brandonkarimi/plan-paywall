@@ -385,6 +385,17 @@
     </div>
 
     <div class="card">
+      <h2>Default email messages</h2>
+      <p class="small muted" style="margin:-6px 0 14px">Sent when the box on the Send page is left empty. <b>{client}</b>, <b>{project}</b> and <b>{amount}</b> are filled in. Empty a box here to go back to the original wording.</p>
+      <div class="grid">
+        <div class="full"><label for="e-preview-subject">Preview email subject</label><input id="e-preview-subject" type="text" maxlength="300"></div>
+        <div class="full"><label for="e-preview-body">Preview email message</label><textarea id="e-preview-body" rows="6"></textarea></div>
+        <div class="full"><label for="e-final-subject">Final plans email subject</label><input id="e-final-subject" type="text" maxlength="300"></div>
+        <div class="full"><label for="e-final-body">Final plans email message</label><textarea id="e-final-body" rows="4"></textarea></div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Preview watermark</h2>
       <div data-picture="watermark" data-wide="1"></div>
     </div>
@@ -568,6 +579,8 @@ async function loadState() {
     $(`p-${k}-email`).value = part.email || ""; $(`p-${k}-pass`).value = ""; $(`p-${k}-pass`).placeholder = part.has_password ? "Saved" : "";
   }
   $("p-fields").classList.toggle("hidden", !ap.enabled); venmoInboxChanged();
+  const em = s.emails || {};
+  EMAIL_FIELDS.forEach(([id, key]) => $(id).value = em[key] || "");
   const sig = s.signature || {};
   SIG_FIELDS.forEach(k => $("g-" + k).value = sig[k] || "");
   updateSigPreview();
@@ -593,6 +606,8 @@ function renderPictures() {
 const SIG_FIELDS = ["name", "phone", "email", "license", "street", "city"];
 function sigValues() { return Object.fromEntries(SIG_FIELDS.map(k => [k, $("g-" + k).value])); }
 let sigTimer = null;
+const EMAIL_FIELDS = [["e-preview-subject", "preview_subject"], ["e-preview-body", "preview_body"],
+  ["e-final-subject", "final_subject"], ["e-final-body", "final_body"]];
 function updateSigPreview() {
   clearTimeout(sigTimer);
   sigTimer = setTimeout(async () => { if (api) $("sig-preview").innerHTML = await api.signature_preview(sigValues()); }, 150);
@@ -635,6 +650,7 @@ $("settings-save").addEventListener("click", async () => {
     zelle: { enabled: $("m-zelle").checked, recipient: $("m-zelle-to").value, name: $("m-zelle-name").value },
     venmo: { enabled: $("m-venmo").checked, username: $("m-venmo-user").value },
     signature: sigValues(),
+    emails: Object.fromEntries(EMAIL_FIELDS.map(([id, key]) => [key, $(id).value])),
     auto_payments: { enabled: $("p-on").checked,
       zelle: { email: $("p-zelle-email").value, password: $("p-zelle-pass").value },
       venmo: { email: $("p-venmo-email").value, password: $("p-venmo-pass").value } },

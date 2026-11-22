@@ -299,7 +299,8 @@ def message_paragraphs(text):
 
 
 def _wording(settings, key):
-    return config.EMAIL_DEFAULTS[key]
+    """The engineer's saved default from Settings, or the built-in wording."""
+    return ((settings.get("emails") or {}).get(key) or "").strip() or config.EMAIL_DEFAULTS[key]
 
 
 def invite(tx, settings):

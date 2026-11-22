@@ -6,7 +6,7 @@ The client receives a watermarked preview and your Zelle and/or Venmo QR codes. 
 
 ## How it works
 
-1. **Send:** choose the plan PDF and, optionally, your invoice PDF, enter the client's name, email and the price, and optionally write the subject and message of the preview and final emails (left empty, standard wording is used).
+1. **Send:** choose the plan PDF and, optionally, your invoice PDF, enter the client's name, email and the price, and optionally write the subject and message of the preview and final emails (left empty, your default wording from Settings is used).
 2. **Client pays:** by Zelle or Venmo. No memo or note is needed.
 3. **Plans go out:** with automatic payments on, Plan Sender spots the Wells Fargo (Zelle) or Venmo payment email within seconds, even while the app is closed, and emails the final PDF. Payments it isn't sure about (e.g. $10 or more short, or a different payer name) wait for your OK in Transactions. You can also click *Mark as paid* yourself.
 
